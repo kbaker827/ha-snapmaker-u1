@@ -1,0 +1,73 @@
+execute_gcode:
+  name: Execute G-code
+  description: >
+    Send a raw G-code command or macro to the Snapmaker U1.
+  fields:
+    config_entry_id:
+      name: Config Entry
+      description: The config entry ID for the printer you want to control.
+      required: true
+      selector:
+        config_entry:
+          integration: snapmaker_u1
+    script:
+      name: G-code script
+      description: The G-code command or macro to execute (e.g. "G28 X Y" or "BED_MESH_CALIBRATE").
+      required: true
+      example: "G28"
+      selector:
+        text:
+
+set_bed_temperature:
+  name: Set bed temperature
+  description: Set the heated bed target temperature.
+  fields:
+    config_entry_id:
+      name: Config Entry
+      description: The config entry ID for the printer.
+      required: true
+      selector:
+        config_entry:
+          integration: snapmaker_u1
+    temperature:
+      name: Temperature
+      description: Target temperature in °C. Use 0 to turn off.
+      required: true
+      example: 60
+      selector:
+        number:
+          min: 0
+          max: 120
+          unit_of_measurement: "°C"
+
+set_nozzle_temperature:
+  name: Set nozzle temperature
+  description: Set a nozzle (extruder) target temperature.
+  fields:
+    config_entry_id:
+      name: Config Entry
+      description: The config entry ID for the printer.
+      required: true
+      selector:
+        config_entry:
+          integration: snapmaker_u1
+    temperature:
+      name: Temperature
+      description: Target temperature in °C. Use 0 to turn off.
+      required: true
+      example: 215
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: "°C"
+    extruder_index:
+      name: Extruder index
+      description: Which nozzle to set (0 = T0, 1 = T1, etc.).
+      required: false
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 3
+          mode: box

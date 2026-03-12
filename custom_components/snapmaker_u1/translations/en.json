@@ -1,0 +1,105 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Snapmaker U1",
+        "description": "Enter the IP address of your Snapmaker U1 printer. Leave the API key blank if your printer uses the default trusted LAN client configuration.",
+        "data": {
+          "host": "IP Address or Hostname",
+          "port": "Port (default 80)",
+          "api_key": "API Key (optional)"
+        },
+        "data_description": {
+          "host": "The IP address or hostname of your Snapmaker U1 on your local network.",
+          "api_key": "Only required if you have configured authentication in Moonraker."
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Snapmaker U1",
+        "description": "Update the connection settings for your Snapmaker U1.",
+        "data": {
+          "host": "IP Address or Hostname",
+          "port": "Port",
+          "api_key": "API Key (optional)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the printer. Please check the IP address and that the printer is powered on and on the same network."
+    },
+    "abort": {
+      "already_configured": "This printer is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "print_state": {
+        "name": "Print State",
+        "state": {
+          "standby": "Standby",
+          "printing": "Printing",
+          "paused": "Paused",
+          "complete": "Complete",
+          "error": "Error",
+          "cancelled": "Cancelled"
+        }
+      },
+      "print_progress": { "name": "Print Progress" },
+      "current_layer": { "name": "Current Layer" },
+      "total_layers": { "name": "Total Layers" },
+      "print_duration": { "name": "Print Duration" },
+      "time_remaining": { "name": "Time Remaining" },
+      "filament_used": { "name": "Filament Used" },
+      "filename": { "name": "Filename" },
+      "bed_temperature": { "name": "Bed Temperature" },
+      "bed_target": { "name": "Bed Target Temperature" },
+      "fan_speed": { "name": "Part Cooling Fan" },
+      "klipper_state": {
+        "name": "Klipper State",
+        "state": {
+          "ready": "Ready",
+          "startup": "Starting Up",
+          "shutdown": "Shutdown",
+          "error": "Error"
+        }
+      },
+      "toolhead_position": { "name": "Toolhead Position" },
+      "nozzle_temperature": { "name": "Nozzle Temperature" },
+      "nozzle_target": { "name": "Nozzle Target Temperature" }
+    },
+    "binary_sensor": {
+      "printer_ready": { "name": "Printer Ready" },
+      "is_printing": { "name": "Printing" },
+      "is_paused": { "name": "Paused" },
+      "has_error": { "name": "Error" }
+    },
+    "button": {
+      "pause_print": { "name": "Pause Print" },
+      "resume_print": { "name": "Resume Print" },
+      "cancel_print": { "name": "Cancel Print" },
+      "emergency_stop": { "name": "Emergency Stop" },
+      "home_all": { "name": "Home All Axes" },
+      "home_x": { "name": "Home X" },
+      "home_y": { "name": "Home Y" },
+      "home_z": { "name": "Home Z" },
+      "restart_klipper": { "name": "Restart Klipper" }
+    },
+    "camera": {
+      "webcam": { "name": "Webcam" }
+    }
+  },
+  "services": {
+    "execute_gcode": {
+      "name": "Execute G-code",
+      "description": "Send a raw G-code command or macro to the printer."
+    },
+    "set_bed_temperature": {
+      "name": "Set Bed Temperature",
+      "description": "Set the heated bed target temperature."
+    },
+    "set_nozzle_temperature": {
+      "name": "Set Nozzle Temperature",
+      "description": "Set a nozzle (extruder) target temperature."
+    }
+  }
+}

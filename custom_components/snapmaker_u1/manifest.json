@@ -1,0 +1,11 @@
+{
+  "domain": "snapmaker_u1",
+  "name": "Snapmaker U1",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/your-repo/ha-snapmaker-u1",
+  "iot_class": "local_push",
+  "requirements": ["aiohttp>=3.9.0"],
+  "version": "1.0.0"
+}
