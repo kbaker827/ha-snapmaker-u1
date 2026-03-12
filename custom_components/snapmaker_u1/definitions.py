@@ -51,6 +51,7 @@ class SnapmakerBinarySensorEntityDescription(BinarySensorEntityDescription):
     value_fn: Callable | None = None
     available_fn: Callable = field(default=lambda self: True)
     exists_fn: Callable = field(default=lambda coordinator: True)
+    extra_attributes_fn: Callable = field(default=lambda self: {})
 
 
 # ---------------------------------------------------------------------------
