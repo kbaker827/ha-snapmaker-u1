@@ -14,6 +14,7 @@ ENDPOINT_GCODE_SCRIPT = "/printer/gcode/script"
 ENDPOINT_SERVER_TEMPERATURE_STORE = "/server/temperature_store"
 ENDPOINT_FILES_LIST = "/server/files/list"
 ENDPOINT_PRINT_START = "/printer/print/start"
+ENDPOINT_WEBCAMS_LIST = "/server/webcams/list"
 
 # HA event names fired on print-state transitions
 EVENT_PRINT_STARTED = "snapmaker_u1_print_started"

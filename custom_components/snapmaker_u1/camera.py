@@ -18,6 +18,8 @@ _LOGGER = logging.getLogger(__name__)
 
 CAMERA_CONNECT_TIMEOUT = 5
 CAMERA_READ_TIMEOUT = 10
+# Refresh the still image every 2 seconds when the camera card is open
+CAMERA_FRAME_INTERVAL = 2.0
 
 
 async def async_setup_entry(
@@ -31,11 +33,18 @@ async def async_setup_entry(
 
 
 class SnapmakerCamera(Camera):
-    """MJPEG camera entity for the Snapmaker U1 webcam."""
+    """Snapshot-based camera entity for the Snapmaker U1 webcam.
+
+    Uses ``async_camera_image`` to fetch JPEG stills from the Moonraker
+    snapshot endpoint.  ``stream_source`` is intentionally not implemented
+    so that Home Assistant does not attempt HLS transcoding of the MJPEG
+    stream (which requires ffmpeg and is often unnecessary for a printer cam).
+    """
 
     _attr_has_entity_name = True
     _attr_name = "Webcam"
     _attr_supported_features = CameraEntityFeature(0)
+    _attr_frame_interval = CAMERA_FRAME_INTERVAL
 
     def __init__(
         self,
@@ -87,9 +96,3 @@ class SnapmakerCamera(Camera):
         except aiohttp.ClientError as exc:
             _LOGGER.debug("Webcam snapshot error: %s", exc)
             return None
-
-    async def stream_source(self) -> str | None:
-        """Return the MJPEG stream URL for use by the frontend."""
-        if self._client is None:
-            return None
-        return self._client.camera_stream_url

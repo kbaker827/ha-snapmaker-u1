@@ -24,6 +24,7 @@ from .const import (
     ENDPOINT_PRINTER_OBJECTS_QUERY,
     ENDPOINT_PRINTER_RESTART,
     ENDPOINT_SERVER_INFO,
+    ENDPOINT_WEBCAMS_LIST,
     KLIPPER_READY,
     KLIPPER_SHUTDOWN,
     PRINTER_OBJECTS,
@@ -89,6 +90,11 @@ class SnapmakerClient:
         self._filament_sensor_keys: list[str] = []
         self._temp_sensor_keys: list[str] = []
 
+        # Camera URLs – populated by webcam discovery; fall back to defaults.
+        # Initialised to None here; set properly after base_url is available.
+        self._camera_stream_url: str | None = None
+        self._camera_snapshot_url: str | None = None
+
         # Reconnection backoff
         self._reconnect_delay = 5
         self._max_reconnect_delay = 60
@@ -114,11 +120,11 @@ class SnapmakerClient:
 
     @property
     def camera_stream_url(self) -> str:
-        return f"{self.base_url}{CAMERA_STREAM_PATH}"
+        return self._camera_stream_url or f"{self.base_url}{CAMERA_STREAM_PATH}"
 
     @property
     def camera_snapshot_url(self) -> str:
-        return f"{self.base_url}{CAMERA_SNAPSHOT_PATH}"
+        return self._camera_snapshot_url or f"{self.base_url}{CAMERA_SNAPSHOT_PATH}"
 
     @property
     def headers(self) -> dict[str, str]:
@@ -163,6 +169,7 @@ class SnapmakerClient:
         try:
             await self._fetch_printer_info()
             await self._discover_dynamic_objects()
+            await self._discover_webcams()
             await self._fetch_printer_state()
             await self.fetch_file_list()
             self._connected = True
@@ -212,6 +219,41 @@ class SnapmakerClient:
             )
         except Exception as exc:
             _LOGGER.debug("Could not discover dynamic printer objects: %s", exc)
+
+    async def _discover_webcams(self) -> None:
+        """Query /server/webcams/list and use the first enabled webcam's URLs."""
+        try:
+            data = await self._get(ENDPOINT_WEBCAMS_LIST)
+            webcams: list[dict] = data.get("result", {}).get("webcams", [])
+            enabled = [w for w in webcams if w.get("enabled", True)]
+            if not enabled:
+                _LOGGER.debug("No enabled webcams found via /server/webcams/list")
+                return
+            cam = enabled[0]
+            stream_url: str = cam.get("stream_url", "")
+            snapshot_url: str = cam.get("snapshot_url", "")
+            if stream_url:
+                # Moonraker may return relative paths (e.g. "/webcam/?action=stream")
+                # or full URLs (e.g. "http://host/webcam/?action=stream")
+                self._camera_stream_url = (
+                    stream_url
+                    if stream_url.startswith("http")
+                    else f"{self.base_url}{stream_url}"
+                )
+            if snapshot_url:
+                self._camera_snapshot_url = (
+                    snapshot_url
+                    if snapshot_url.startswith("http")
+                    else f"{self.base_url}{snapshot_url}"
+                )
+            _LOGGER.debug(
+                "Discovered webcam '%s': stream=%s snapshot=%s",
+                cam.get("name", "unknown"),
+                self._camera_stream_url,
+                self._camera_snapshot_url,
+            )
+        except Exception as exc:
+            _LOGGER.debug("Could not discover webcams: %s", exc)
 
     def _all_objects(self) -> list[str]:
         """Return the full list of objects to subscribe/query."""
