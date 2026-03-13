@@ -86,6 +86,11 @@
     },
     "camera": {
       "webcam": { "name": "Webcam" }
+    },
+    "number": {
+      "bed_target": { "name": "Bed Target Temperature" },
+      "fan_speed_setpoint": { "name": "Part Cooling Fan Speed" },
+      "nozzle_target_setpoint": { "name": "Nozzle Target Temperature" }
     }
   },
   "services": {

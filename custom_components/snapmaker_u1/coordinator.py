@@ -80,7 +80,7 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
             raise UpdateFailed("Client not initialised")
         if not self._client.connected:
             try:
-                await self._client._fetch_printer_state()
+                await self._client.fetch_state()
             except Exception as exc:
                 raise UpdateFailed(f"HTTP poll failed: {exc}") from exc
         return self._client.data
