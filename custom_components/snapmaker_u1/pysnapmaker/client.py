@@ -434,12 +434,15 @@ class SnapmakerClient:
 
     async def _fetch_printer_state(self) -> None:
         """Fetch current printer state via HTTP (used for init and fallback)."""
-        objects_qs = "&".join(PRINTER_OBJECTS)
         data = await self._get(
             ENDPOINT_PRINTER_OBJECTS_QUERY, params=dict.fromkeys(PRINTER_OBJECTS, "")
         )
         status = data.get("result", {}).get("status", {})
         await self._process_status(status)
+
+    async def fetch_state(self) -> None:
+        """Public wrapper – refresh printer state via HTTP."""
+        await self._fetch_printer_state()
 
     # ------------------------------------------------------------------
     # Printer control commands
@@ -480,6 +483,8 @@ class SnapmakerClient:
 
     async def set_nozzle_temperature(self, temp: float, index: int = 0) -> None:
         """Set the nozzle target temperature (index 0–3 for T0–T3)."""
+        if not (0 <= index <= 3):
+            raise ValueError(f"Extruder index must be 0–3, got {index}")
         await self.execute_gcode(f"T{index}\nM104 S{temp}")
 
     async def set_fan_speed(self, speed_pct: int) -> None:

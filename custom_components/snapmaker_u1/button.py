@@ -18,7 +18,7 @@ from .sensor import SnapmakerBaseEntity
 _LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(frozen=False)
+@dataclass(frozen=True, kw_only=True)
 class SnapmakerButtonEntityDescription(ButtonEntityDescription):
     """Button description with an async press handler."""
 
