@@ -28,7 +28,7 @@ from .coordinator import SnapmakerDataUpdateCoordinator
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=False)
+@dataclass(frozen=True, kw_only=True)
 class SnapmakerSensorEntityDescription(SensorEntityDescription):
     """Extends SensorEntityDescription with lambdas used by the entity classes."""
 
@@ -44,7 +44,7 @@ class SnapmakerSensorEntityDescription(SensorEntityDescription):
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=False)
+@dataclass(frozen=True, kw_only=True)
 class SnapmakerBinarySensorEntityDescription(BinarySensorEntityDescription):
     """Extends BinarySensorEntityDescription with lambdas."""
 
