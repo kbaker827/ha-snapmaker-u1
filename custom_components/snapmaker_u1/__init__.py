@@ -21,12 +21,15 @@ PLATFORMS: list[Platform] = [
     Platform.BUTTON,
     Platform.CAMERA,
     Platform.NUMBER,
+    Platform.SELECT,
+    Platform.SWITCH,
 ]
 
 # Service names
 SERVICE_EXECUTE_GCODE = "execute_gcode"
 SERVICE_SET_BED_TEMPERATURE = "set_bed_temperature"
 SERVICE_SET_NOZZLE_TEMPERATURE = "set_nozzle_temperature"
+SERVICE_START_PRINT = "start_print"
 
 # Service schemas
 EXECUTE_GCODE_SCHEMA = vol.Schema(
@@ -52,6 +55,12 @@ SET_NOZZLE_TEMPERATURE_SCHEMA = vol.Schema(
         vol.Optional("extruder_index", default=0): vol.All(
             vol.Coerce(int), vol.Range(min=0, max=3)
         ),
+    }
+)
+START_PRINT_SCHEMA = vol.Schema(
+    {
+        vol.Required("config_entry_id"): cv.string,
+        vol.Required("filename"): cv.string,
     }
 )
 
@@ -84,6 +93,9 @@ def _register_services(hass: HomeAssistant) -> None:
             call.data.get("extruder_index", 0),
         )
 
+    async def handle_start_print(call: ServiceCall) -> None:
+        await _get_client(hass, call).start_print(call.data["filename"])
+
     hass.services.async_register(
         DOMAIN, SERVICE_EXECUTE_GCODE, handle_execute_gcode, EXECUTE_GCODE_SCHEMA
     )
@@ -98,6 +110,9 @@ def _register_services(hass: HomeAssistant) -> None:
         SERVICE_SET_NOZZLE_TEMPERATURE,
         handle_set_nozzle_temperature,
         SET_NOZZLE_TEMPERATURE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_START_PRINT, handle_start_print, START_PRINT_SCHEMA
     )
 
 
@@ -115,7 +130,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _register_services(hass)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Reload the entry if options change (e.g. scan interval)
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
     return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle options update by reloading the entry."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -136,6 +160,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_EXECUTE_GCODE,
             SERVICE_SET_BED_TEMPERATURE,
             SERVICE_SET_NOZZLE_TEMPERATURE,
+            SERVICE_START_PRINT,
         ):
             hass.services.async_remove(DOMAIN, svc)
 

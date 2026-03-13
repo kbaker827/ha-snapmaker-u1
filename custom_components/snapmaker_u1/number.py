@@ -1,7 +1,7 @@
 """Number platform for the Snapmaker U1 integration.
 
 Provides interactive setpoint controls for bed temperature, nozzle temperatures,
-and part-cooling fan speed directly from the Home Assistant dashboard.
+part-cooling fan speed, print speed factor, and extrusion flow rate.
 """
 from __future__ import annotations
 
@@ -68,6 +68,32 @@ STATIC_NUMBER_DESCRIPTIONS: list[SnapmakerNumberEntityDescription] = [
         set_fn=lambda client, v: client.set_fan_speed(int(v)),
         available_fn=lambda coordinator: coordinator.data.is_ready,
     ),
+    SnapmakerNumberEntityDescription(
+        key="speed_factor",
+        translation_key="speed_factor_setpoint",
+        native_unit_of_measurement=PERCENTAGE,
+        native_min_value=10,
+        native_max_value=200,
+        native_step=1,
+        mode=NumberMode.SLIDER,
+        icon="mdi:speedometer",
+        value_fn=lambda coordinator: coordinator.data.speed_factor_pct,
+        set_fn=lambda client, v: client.set_speed_factor(int(v)),
+        available_fn=lambda coordinator: coordinator.data.is_printing,
+    ),
+    SnapmakerNumberEntityDescription(
+        key="flow_rate",
+        translation_key="flow_rate_setpoint",
+        native_unit_of_measurement=PERCENTAGE,
+        native_min_value=50,
+        native_max_value=150,
+        native_step=1,
+        mode=NumberMode.SLIDER,
+        icon="mdi:water-percent",
+        value_fn=lambda coordinator: coordinator.data.flow_rate_pct,
+        set_fn=lambda client, v: client.set_flow_rate(int(v)),
+        available_fn=lambda coordinator: coordinator.data.is_printing,
+    ),
 ]
 
 
@@ -81,7 +107,7 @@ async def async_setup_entry(
 
     entities: list[NumberEntity] = []
 
-    # Static entities (bed temp, fan speed)
+    # Static entities (bed temp, fan speed, speed factor, flow rate)
     for desc in STATIC_NUMBER_DESCRIPTIONS:
         entities.append(SnapmakerNumberEntity(coordinator, desc))
 

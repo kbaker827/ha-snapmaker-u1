@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .const import STATE_STANDBY, KLIPPER_STARTUP
+from .const import KLIPPER_STARTUP, STATE_STANDBY
 
 
 @dataclass
@@ -75,6 +75,22 @@ class IdleTimeout:
 
 
 @dataclass
+class GcodeMove:
+    """Live G-code motion state (includes override factors)."""
+
+    speed_factor: float = 1.0    # M220: 1.0 = 100 %
+    extrude_factor: float = 1.0  # M221: 1.0 = 100 %
+
+
+@dataclass
+class FilamentSensor:
+    """State of a single filament runout sensor."""
+
+    enabled: bool = True
+    filament_detected: bool = True   # True = filament present
+
+
+@dataclass
 class SnapmakerPrinterData:
     """Complete snapshot of Snapmaker U1 printer state."""
 
@@ -89,22 +105,33 @@ class SnapmakerPrinterData:
     # Temperatures
     extruders: dict[str, ExtruderData] = field(default_factory=dict)
     heater_bed: HeaterBedData = field(default_factory=HeaterBedData)
+    # Extra temperature sensors (e.g. "chamber", "mcu")
+    chamber_sensors: dict[str, float] = field(default_factory=dict)
 
-    # Motion
+    # Motion / overrides
     toolhead: Toolhead = field(default_factory=Toolhead)
+    gcode_move: GcodeMove = field(default_factory=GcodeMove)
 
     # Ancillary
     fan: FanData = field(default_factory=FanData)
     idle_timeout: IdleTimeout = field(default_factory=IdleTimeout)
     display_message: str = ""
 
-    # Detected hardware
+    # Filament sensors  {object_key: FilamentSensor}
+    filament_sensors: dict[str, FilamentSensor] = field(default_factory=dict)
+
+    # File management
+    available_files: list[str] = field(default_factory=list)
+
+    # Hardware counts
     extruder_count: int = 0
 
     # Printer identity (from /printer/info)
     printer_name: str = "Snapmaker U1"
     firmware_version: str = ""
-    host_stats_available: bool = False
+
+    # Work-light optimistic state
+    work_light_on: bool = False
 
     # -------------------------------------------------------------------
     # Computed properties
@@ -144,6 +171,16 @@ class SnapmakerPrinterData:
             return 0
         total_estimated = elapsed / progress
         return max(0, int(total_estimated - elapsed))
+
+    @property
+    def speed_factor_pct(self) -> int:
+        """Print speed override as a percentage (e.g. 100)."""
+        return round(self.gcode_move.speed_factor * 100)
+
+    @property
+    def flow_rate_pct(self) -> int:
+        """Extrusion flow-rate override as a percentage (e.g. 100)."""
+        return round(self.gcode_move.extrude_factor * 100)
 
     @property
     def primary_extruder(self) -> Optional[ExtruderData]:

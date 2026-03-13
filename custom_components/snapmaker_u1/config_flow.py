@@ -6,9 +6,18 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.data_entry_flow import FlowResult
 
-from .const import CONF_API_KEY, CONF_HOST, CONF_PORT, DEFAULT_PORT, DOMAIN
+from .const import (
+    CONF_API_KEY,
+    CONF_HOST,
+    CONF_PORT,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_PORT,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+)
 from .pysnapmaker.client import SnapmakerClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -28,6 +37,12 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Snapmaker U1."""
 
     VERSION = 1
+
+    @staticmethod
+    @config_entries.callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> SnapmakerOptionsFlow:
+        """Return the options flow handler."""
+        return SnapmakerOptionsFlow(config_entry)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -110,3 +125,30 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=schema,
             errors=errors,
         )
+
+
+class SnapmakerOptionsFlow(config_entries.OptionsFlow):
+    """Handle options for the Snapmaker U1 integration."""
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        self.config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the options."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current_interval = self.config_entry.options.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_SCAN_INTERVAL,
+                    default=current_interval,
+                ): vol.All(vol.Coerce(int), vol.Range(min=10, max=300)),
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

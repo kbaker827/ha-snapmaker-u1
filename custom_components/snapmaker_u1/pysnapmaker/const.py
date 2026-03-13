@@ -13,6 +13,23 @@ ENDPOINT_PRINTER_RESTART = "/printer/restart"
 ENDPOINT_GCODE_SCRIPT = "/printer/gcode/script"
 ENDPOINT_SERVER_TEMPERATURE_STORE = "/server/temperature_store"
 ENDPOINT_FILES_LIST = "/server/files/list"
+ENDPOINT_PRINT_START = "/printer/print/start"
+
+# HA event names fired on print-state transitions
+EVENT_PRINT_STARTED = "snapmaker_u1_print_started"
+EVENT_PRINT_COMPLETE = "snapmaker_u1_print_complete"
+EVENT_PRINT_FAILED = "snapmaker_u1_print_failed"
+EVENT_PRINT_PAUSED = "snapmaker_u1_print_paused"
+EVENT_PRINT_CANCELLED = "snapmaker_u1_print_cancelled"
+
+# Map Moonraker print state → HA event suffix (only states that trigger events)
+PRINT_STATE_EVENTS: dict[str, str] = {
+    "printing": EVENT_PRINT_STARTED,
+    "complete": EVENT_PRINT_COMPLETE,
+    "error": EVENT_PRINT_FAILED,
+    "paused": EVENT_PRINT_PAUSED,
+    "cancelled": EVENT_PRINT_CANCELLED,
+}
 
 # WebSocket
 WS_ENDPOINT = "/websocket"

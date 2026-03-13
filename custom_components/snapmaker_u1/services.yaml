@@ -71,3 +71,22 @@ set_nozzle_temperature:
           min: 0
           max: 3
           mode: box
+
+start_print:
+  name: Start print
+  description: Start printing a G-code file already on the printer's storage.
+  fields:
+    config_entry_id:
+      name: Config Entry
+      description: The config entry ID for the printer.
+      required: true
+      selector:
+        config_entry:
+          integration: snapmaker_u1
+    filename:
+      name: Filename
+      description: The name of the G-code file to print (as returned by the file list).
+      required: true
+      example: "benchy.gcode"
+      selector:
+        text:
