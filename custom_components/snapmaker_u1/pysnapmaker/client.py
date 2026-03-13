@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Callable, Optional
 
 import aiohttp
@@ -17,7 +18,9 @@ from .const import (
     ENDPOINT_PRINT_CANCEL,
     ENDPOINT_PRINT_PAUSE,
     ENDPOINT_PRINT_RESUME,
+    ENDPOINT_PRINT_START,
     ENDPOINT_PRINTER_INFO,
+    ENDPOINT_PRINTER_OBJECTS_LIST,
     ENDPOINT_PRINTER_OBJECTS_QUERY,
     ENDPOINT_PRINTER_RESTART,
     ENDPOINT_SERVER_INFO,
@@ -35,6 +38,8 @@ from .const import (
 from .models import (
     ExtruderData,
     FanData,
+    FilamentSensor,
+    GcodeMove,
     HeaterBedData,
     IdleTimeout,
     PrintStats,
@@ -44,6 +49,10 @@ from .models import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Regex patterns to identify dynamic Moonraker printer objects
+_RE_FILAMENT_SENSOR = re.compile(r"^filament_switch_sensor\s+\S+")
+_RE_TEMP_SENSOR = re.compile(r"^temperature_sensor\s+\S+")
 
 
 class SnapmakerClient:
@@ -75,6 +84,10 @@ class SnapmakerClient:
         self._data = SnapmakerPrinterData()
         self._connected = False
         self._callbacks: list[Callable] = []
+
+        # Dynamically discovered object keys
+        self._filament_sensor_keys: list[str] = []
+        self._temp_sensor_keys: list[str] = []
 
         # Reconnection backoff
         self._reconnect_delay = 5
@@ -122,6 +135,16 @@ class SnapmakerClient:
     def connected(self) -> bool:
         return self._connected
 
+    @property
+    def filament_sensor_keys(self) -> list[str]:
+        """Names of discovered filament switch sensor objects."""
+        return list(self._filament_sensor_keys)
+
+    @property
+    def temp_sensor_keys(self) -> list[str]:
+        """Names of discovered extra temperature sensor objects."""
+        return list(self._temp_sensor_keys)
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -139,7 +162,9 @@ class SnapmakerClient:
             self._session = aiohttp.ClientSession()
         try:
             await self._fetch_printer_info()
+            await self._discover_dynamic_objects()
             await self._fetch_printer_state()
+            await self.fetch_file_list()
             self._connected = True
             return True
         except Exception as exc:
@@ -164,6 +189,33 @@ class SnapmakerClient:
                 pass
         if self._own_session and self._session and not self._session.closed:
             await self._session.close()
+
+    # ------------------------------------------------------------------
+    # Dynamic object discovery
+    # ------------------------------------------------------------------
+
+    async def _discover_dynamic_objects(self) -> None:
+        """Query /printer/objects/list and find filament/temp sensor objects."""
+        try:
+            data = await self._get(ENDPOINT_PRINTER_OBJECTS_LIST)
+            objects: list[str] = data.get("result", {}).get("objects", [])
+            self._filament_sensor_keys = [
+                o for o in objects if _RE_FILAMENT_SENSOR.match(o)
+            ]
+            self._temp_sensor_keys = [
+                o for o in objects if _RE_TEMP_SENSOR.match(o)
+            ]
+            _LOGGER.debug(
+                "Discovered filament sensors: %s; extra temp sensors: %s",
+                self._filament_sensor_keys,
+                self._temp_sensor_keys,
+            )
+        except Exception as exc:
+            _LOGGER.debug("Could not discover dynamic printer objects: %s", exc)
+
+    def _all_objects(self) -> list[str]:
+        """Return the full list of objects to subscribe/query."""
+        return PRINTER_OBJECTS + self._filament_sensor_keys + self._temp_sensor_keys
 
     # ------------------------------------------------------------------
     # WebSocket connection management
@@ -226,7 +278,7 @@ class SnapmakerClient:
 
     async def _subscribe_objects(self) -> None:
         """Send printer.objects.subscribe via WebSocket."""
-        objects_param = {obj: None for obj in PRINTER_OBJECTS}
+        objects_param = {obj: None for obj in self._all_objects()}
         payload = {
             "jsonrpc": "2.0",
             "method": WS_METHOD_SUBSCRIBE,
@@ -268,8 +320,9 @@ class SnapmakerClient:
             await self._notify_callbacks()
 
         elif method == WS_NOTIFY_HISTORY_CHANGED:
-            # A print just finished; refresh state
+            # A print just finished; refresh state and file list
             await self._fetch_printer_state()
+            await self.fetch_file_list()
 
     async def _process_status(self, status: dict[str, Any]) -> None:
         """Parse a Moonraker status dict and update the data model."""
@@ -355,6 +408,14 @@ class SnapmakerClient:
                 self._data.toolhead.max_accel = th["max_accel"]
             changed = True
 
+        if "gcode_move" in status:
+            gm = status["gcode_move"]
+            if "speed_factor" in gm:
+                self._data.gcode_move.speed_factor = gm["speed_factor"]
+            if "extrude_factor" in gm:
+                self._data.gcode_move.extrude_factor = gm["extrude_factor"]
+            changed = True
+
         if "fan" in status:
             fan = status["fan"]
             if "speed" in fan:
@@ -374,6 +435,27 @@ class SnapmakerClient:
             if "printing_time" in it:
                 self._data.idle_timeout.printing_time = it["printing_time"]
             changed = True
+
+        # Dynamic filament switch sensors
+        for key in self._filament_sensor_keys:
+            if key in status:
+                fs = status[key]
+                if key not in self._data.filament_sensors:
+                    self._data.filament_sensors[key] = FilamentSensor()
+                sensor = self._data.filament_sensors[key]
+                if "enabled" in fs:
+                    sensor.enabled = fs["enabled"]
+                if "filament_detected" in fs:
+                    sensor.filament_detected = fs["filament_detected"]
+                changed = True
+
+        # Dynamic temperature sensors (chamber, MCU, etc.)
+        for key in self._temp_sensor_keys:
+            if key in status:
+                ts = status[key]
+                if "temperature" in ts:
+                    self._data.chamber_sensors[key] = round(ts["temperature"], 1)
+                changed = True
 
         if changed:
             await self._notify_callbacks()
@@ -434,8 +516,9 @@ class SnapmakerClient:
 
     async def _fetch_printer_state(self) -> None:
         """Fetch current printer state via HTTP (used for init and fallback)."""
+        all_obj = self._all_objects()
         data = await self._get(
-            ENDPOINT_PRINTER_OBJECTS_QUERY, params=dict.fromkeys(PRINTER_OBJECTS, "")
+            ENDPOINT_PRINTER_OBJECTS_QUERY, params=dict.fromkeys(all_obj, "")
         )
         status = data.get("result", {}).get("status", {})
         await self._process_status(status)
@@ -443,6 +526,20 @@ class SnapmakerClient:
     async def fetch_state(self) -> None:
         """Public wrapper – refresh printer state via HTTP."""
         await self._fetch_printer_state()
+
+    async def fetch_file_list(self) -> None:
+        """Fetch available G-code files and update the data model."""
+        try:
+            data = await self._get(ENDPOINT_FILES_LIST)
+            files = data.get("result", [])
+            self._data.available_files = sorted(
+                f["filename"]
+                for f in files
+                if isinstance(f, dict) and "filename" in f
+            )
+            _LOGGER.debug("Fetched %d G-code files", len(self._data.available_files))
+        except Exception as exc:
+            _LOGGER.debug("Could not fetch file list: %s", exc)
 
     # ------------------------------------------------------------------
     # Printer control commands
@@ -492,8 +589,30 @@ class SnapmakerClient:
         pwm = int(speed_pct / 100 * 255)
         await self.execute_gcode(f"M106 S{pwm}")
 
+    async def set_speed_factor(self, speed_pct: int) -> None:
+        """Set print speed override via M220 (10–200 %)."""
+        await self.execute_gcode(f"M220 S{speed_pct}")
+
+    async def set_flow_rate(self, flow_pct: int) -> None:
+        """Set extrusion flow-rate override via M221 (50–150 %)."""
+        await self.execute_gcode(f"M221 S{flow_pct}")
+
+    async def set_work_light(self, on: bool) -> None:
+        """Toggle the work/chamber light via M355."""
+        await self.execute_gcode(f"M355 S{'1' if on else '0'}")
+
+    async def set_active_tool(self, tool_index: int) -> None:
+        """Switch the active extruder tool (T0–T3)."""
+        if not (0 <= tool_index <= 3):
+            raise ValueError(f"Tool index must be 0–3, got {tool_index}")
+        await self.execute_gcode(f"T{tool_index}")
+
+    async def start_print(self, filename: str) -> None:
+        """Start printing the given G-code file from the virtual SD card."""
+        await self._post(ENDPOINT_PRINT_START, {"filename": filename})
+
     async def list_files(self) -> list[dict]:
-        """Return a list of G-code files on the printer."""
+        """Return a list of G-code file metadata dicts from the printer."""
         data = await self._get(ENDPOINT_FILES_LIST)
         return data.get("result", [])
 

@@ -31,6 +31,19 @@
       "already_configured": "This printer is already configured."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Snapmaker U1 Options",
+        "data": {
+          "scan_interval": "Fallback poll interval (seconds)"
+        },
+        "data_description": {
+          "scan_interval": "How often to poll the printer via HTTP when the WebSocket is disconnected (10–300 seconds)."
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "print_state": {
@@ -49,6 +62,7 @@
       "total_layers": { "name": "Total Layers" },
       "print_duration": { "name": "Print Duration" },
       "time_remaining": { "name": "Time Remaining" },
+      "print_eta": { "name": "Print ETA" },
       "filament_used": { "name": "Filament Used" },
       "filename": { "name": "Filename" },
       "bed_temperature": { "name": "Bed Temperature" },
@@ -65,7 +79,9 @@
       },
       "toolhead_position": { "name": "Toolhead Position" },
       "nozzle_temperature": { "name": "Nozzle Temperature" },
-      "nozzle_target": { "name": "Nozzle Target Temperature" }
+      "nozzle_target": { "name": "Nozzle Target Temperature" },
+      "speed_factor": { "name": "Print Speed" },
+      "flow_rate": { "name": "Flow Rate" }
     },
     "binary_sensor": {
       "printer_ready": { "name": "Printer Ready" },
@@ -90,7 +106,25 @@
     "number": {
       "bed_target": { "name": "Bed Target Temperature" },
       "fan_speed_setpoint": { "name": "Part Cooling Fan Speed" },
-      "nozzle_target_setpoint": { "name": "Nozzle Target Temperature" }
+      "nozzle_target_setpoint": { "name": "Nozzle Target Temperature" },
+      "speed_factor_setpoint": { "name": "Print Speed Override" },
+      "flow_rate_setpoint": { "name": "Flow Rate Override" }
+    },
+    "select": {
+      "print_file": { "name": "Print File" },
+      "active_tool": { "name": "Active Tool" }
+    },
+    "switch": {
+      "work_light": { "name": "Work Light" }
+    }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "print_started": "Print started",
+      "print_complete": "Print complete",
+      "print_failed": "Print failed",
+      "print_paused": "Print paused",
+      "print_cancelled": "Print cancelled"
     }
   },
   "services": {
@@ -105,6 +139,10 @@
     "set_nozzle_temperature": {
       "name": "Set Nozzle Temperature",
       "description": "Set a nozzle (extruder) target temperature."
+    },
+    "start_print": {
+      "name": "Start Print",
+      "description": "Start printing a G-code file from the printer's storage."
     }
   }
 }

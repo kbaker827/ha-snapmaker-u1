@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Callable
 
 from homeassistant.components.binary_sensor import (
@@ -19,6 +20,7 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfTime,
 )
+from homeassistant.util import dt as dt_util
 
 from .coordinator import SnapmakerDataUpdateCoordinator
 
@@ -117,6 +119,20 @@ PRINTER_SENSORS: list[SnapmakerSensorEntityDescription] = [
         available_fn=lambda self: self.coordinator.data.is_printing,
     ),
     SnapmakerSensorEntityDescription(
+        key="print_eta",
+        translation_key="print_eta",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:clock-end",
+        value_fn=lambda self: (
+            dt_util.utcnow()
+            + timedelta(seconds=self.coordinator.data.time_remaining)
+            if self.coordinator.data.time_remaining is not None
+            else None
+        ),
+        available_fn=lambda self: self.coordinator.data.is_printing
+        and self.coordinator.data.time_remaining is not None,
+    ),
+    SnapmakerSensorEntityDescription(
         key="filament_used",
         translation_key="filament_used",
         native_unit_of_measurement=UnitOfLength.MILLIMETERS,
@@ -191,6 +207,22 @@ PRINTER_SENSORS: list[SnapmakerSensorEntityDescription] = [
             "z": round(self.coordinator.data.toolhead.position[2], 2),
             "homed_axes": self.coordinator.data.toolhead.homed_axes,
         },
+    ),
+    SnapmakerSensorEntityDescription(
+        key="speed_factor",
+        translation_key="speed_factor",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:speedometer",
+        value_fn=lambda self: self.coordinator.data.speed_factor_pct,
+    ),
+    SnapmakerSensorEntityDescription(
+        key="flow_rate",
+        translation_key="flow_rate",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:water-percent",
+        value_fn=lambda self: self.coordinator.data.flow_rate_pct,
     ),
 ]
 

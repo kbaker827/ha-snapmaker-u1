@@ -3,13 +3,24 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_API_KEY, CONF_HOST, CONF_PORT, DEFAULT_PORT, DOMAIN
+from .const import (
+    CONF_API_KEY,
+    CONF_HOST,
+    CONF_PORT,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_PORT,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+)
 from .pysnapmaker.client import SnapmakerClient
+from .pysnapmaker.const import PRINT_STATE_EVENTS
 from .pysnapmaker.models import SnapmakerPrinterData
 
 _LOGGER = logging.getLogger(__name__)
@@ -22,14 +33,18 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
     """Manages fetching Snapmaker U1 state, preferring WebSocket push updates."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        scan_interval = timedelta(
+            seconds=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        )
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=_FALLBACK_POLL_INTERVAL,
+            update_interval=scan_interval,
         )
         self.entry = entry
         self._client: SnapmakerClient | None = None
+        self._last_print_state: str | None = None
 
     # ------------------------------------------------------------------
     # Setup / teardown
@@ -72,6 +87,7 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
 
     async def _async_push_update(self, data: SnapmakerPrinterData) -> None:
         """Called by the WebSocket client when new data arrives."""
+        await self._fire_print_state_events(data)
         self.async_set_updated_data(data)
 
     async def _async_update_data(self) -> SnapmakerPrinterData:
@@ -84,6 +100,37 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
             except Exception as exc:
                 raise UpdateFailed(f"HTTP poll failed: {exc}") from exc
         return self._client.data
+
+    # ------------------------------------------------------------------
+    # HA event bus
+    # ------------------------------------------------------------------
+
+    async def _fire_print_state_events(self, data: SnapmakerPrinterData) -> None:
+        """Fire HA bus events when the print state changes."""
+        new_state = data.print_stats.state
+        if new_state == self._last_print_state:
+            return
+        self._last_print_state = new_state
+
+        event_name = PRINT_STATE_EVENTS.get(new_state)
+        if event_name is None:
+            return
+
+        event_data: dict[str, Any] = {
+            "entry_id": self.entry.entry_id,
+            "state": new_state,
+            "filename": data.print_stats.filename,
+        }
+
+        # Attach device_id so automations can filter by device
+        dev_reg = dr.async_get(self.hass)
+        host = self.entry.data[CONF_HOST]
+        device = dev_reg.async_get_device(identifiers={(DOMAIN, host)})
+        if device:
+            event_data["device_id"] = device.id
+
+        self.hass.bus.async_fire(event_name, event_data)
+        _LOGGER.debug("Fired event %s (state=%s)", event_name, new_state)
 
     # ------------------------------------------------------------------
     # Convenience accessors for entities
