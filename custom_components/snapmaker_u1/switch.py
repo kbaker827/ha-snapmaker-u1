@@ -9,7 +9,7 @@ import logging
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -54,6 +54,14 @@ class WorkLightSwitch(SnapmakerBaseEntity, SwitchEntity):
     @property
     def available(self) -> bool:
         return bool(self.coordinator.data and self.coordinator.data.is_ready)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        # Drop the optimistic guess once the printer reports for itself, so
+        # the switch can correct after the lamp is used outside of HA (e.g.
+        # at the machine or via Fluidd/Mainsail) instead of being stuck.
+        self._optimistic_state = None
+        super()._handle_coordinator_update()
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn the work light on."""
