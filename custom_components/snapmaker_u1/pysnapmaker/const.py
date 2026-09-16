@@ -61,6 +61,9 @@ PRINTER_OBJECTS = [
     "fan",
     "idle_timeout",
     "gcode_move",
+    # Cavity/work light RGBW LED, so the switch can report the real lamp
+    # state instead of only what Home Assistant last commanded.
+    "led cavity_led",
 ]
 
 # Print states (Moonraker/Klipper)

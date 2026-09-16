@@ -55,6 +55,11 @@ _LOGGER = logging.getLogger(__name__)
 _RE_FILAMENT_SENSOR = re.compile(r"^filament_switch_sensor\s+\S+")
 _RE_TEMP_SENSOR = re.compile(r"^temperature_sensor\s+\S+")
 
+# Webcam name/location substrings that identify a touchscreen mirror rather
+# than the printer's actual camera (see the remote-screen add-on's
+# "[webcam gui]" Moonraker config entry).
+_SCREEN_MIRROR_WEBCAM_TOKENS = ("gui", "screen")
+
 
 class SnapmakerClient:
     """Async client for the Snapmaker U1 Moonraker API.
@@ -221,7 +226,13 @@ class SnapmakerClient:
             _LOGGER.debug("Could not discover dynamic printer objects: %s", exc)
 
     async def _discover_webcams(self) -> None:
-        """Query /server/webcams/list and use the first enabled webcam's URLs."""
+        """Query /server/webcams/list and use the first real camera's URLs.
+
+        Extended U1 firmware with the remote-screen add-on registers its own
+        touchscreen mirror as a webcam (``[webcam gui]`` in Moonraker config,
+        typically named "gui"). That entry can be returned before the real
+        camera, so it gets excluded here rather than picked as the stream.
+        """
         try:
             data = await self._get(ENDPOINT_WEBCAMS_LIST)
             webcams: list[dict] = data.get("result", {}).get("webcams", [])
@@ -229,7 +240,15 @@ class SnapmakerClient:
             if not enabled:
                 _LOGGER.debug("No enabled webcams found via /server/webcams/list")
                 return
-            cam = enabled[0]
+            real_cameras = [
+                w
+                for w in enabled
+                if not any(
+                    token in f"{w.get('name', '')} {w.get('location', '')}".lower()
+                    for token in _SCREEN_MIRROR_WEBCAM_TOKENS
+                )
+            ]
+            cam = (real_cameras or enabled)[0]
             stream_url: str = cam.get("stream_url", "")
             snapshot_url: str = cam.get("snapshot_url", "")
             if stream_url:
@@ -480,6 +499,17 @@ class SnapmakerClient:
                 self._data.idle_timeout.printing_time = it["printing_time"]
             changed = True
 
+        if "led cavity_led" in status:
+            # Klipper reports color_data as [[R, G, B, W]]. The U1 drives the
+            # cavity lamp on the WHITE channel alone, so a lit chamber reads
+            # [0.0, 0.0, 0.0, 1.0] – any channel above zero counts as on.
+            color_data = status["led cavity_led"].get("color_data")
+            if color_data:
+                self._data.work_light_on = any(
+                    (value or 0) > 0 for channel in color_data for value in channel
+                )
+                changed = True
+
         # Dynamic filament switch sensors
         for key in self._filament_sensor_keys:
             if key in status:
@@ -642,8 +672,16 @@ class SnapmakerClient:
         await self.execute_gcode(f"M221 S{flow_pct}")
 
     async def set_work_light(self, on: bool) -> None:
-        """Toggle the work/chamber light via M355."""
-        await self.execute_gcode(f"M355 S{'1' if on else '0'}")
+        """Toggle the cavity/work light.
+
+        M355 is a Marlin case-light command and is a no-op on the U1's
+        Klipper firmware; the light is actually the cavity_led RGBW LED,
+        controlled via SET_LED.
+        """
+        level = "1" if on else "0"
+        await self.execute_gcode(
+            f"SET_LED LED=cavity_led RED={level} GREEN={level} BLUE={level} WHITE={level}"
+        )
 
     async def set_active_tool(self, tool_index: int) -> None:
         """Switch the active extruder tool (T0–T3)."""
