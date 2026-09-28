@@ -58,8 +58,24 @@ No Snapmaker account or cloud connection is required.
 | Restart Klipper | Restarts the Klipper process |
 
 ### Camera
-- **Webcam** – MJPEG stream from `/webcam/stream.mjpg`
-  Snapshot images pulled from `/webcam/snapshot.jpg`
+- **Webcam** – camera URLs are discovered from Moonraker (`/server/webcams/list`),
+  falling back to `/webcam/snapshot.jpg` and `/webcam/stream.mjpg`. If the
+  snapshot endpoint fails, a frame is taken from the MJPEG stream instead, and
+  the live view proxies the MJPEG stream directly. The URLs in use are shown
+  as `snapshot_url` / `stream_url` attributes on the camera entity.
+
+  Dashboard example (live view):
+
+  ```yaml
+  type: picture-entity
+  entity: camera.snapmaker_u1_webcam
+  camera_view: live
+  ```
+
+> **Note:** The camera is served by the **printer**, not by Home Assistant.
+> This integration does not ship its own Moonraker – it talks to the Moonraker
+> running on the U1. Test camera URLs against the printer's IP, e.g.
+> `http://<printer-ip>/webcam/snapshot.jpg`, not your Home Assistant address.
 
 ### Services
 | Service | Description |
@@ -117,7 +133,7 @@ the API Key field.
 |---|---|
 | "Cannot connect" during setup | Verify the IP, confirm the printer is on and that Fluidd loads in your browser at that address |
 | Sensors stuck at `unavailable` | Check Klipper logs via Fluidd; the WebSocket may be reconnecting |
-| Camera shows no image | Ensure the webcam is enabled in Moonraker's config; test `http://<ip>/webcam/snapshot.jpg` directly |
+| Camera shows no image / "500: Internal Server Error" snapshot | The integration couldn't get an image from the printer. Open `http://<printer-ip>/webcam/` and `http://<printer-ip>/webcam/snapshot.jpg` in a browser (use the **printer's** IP). If neither shows the camera, the printer isn't exposing its camera over HTTP – the Snapmaker app can reach the camera through its own service, so seeing the feed there doesn't guarantee an HTTP endpoint exists. The [Extended Firmware](https://github.com/paxx12/SnapmakerU1-Extended-Firmware) provides `/webcam/snapshot.jpg` and a live stream. Check the camera entity's `snapshot_url` / `stream_url` attributes and the Home Assistant log (it lists every URL tried) |
 | Temperatures show 0 after startup | Klipper may still be initialising; state will update within seconds once ready |
 
 ---
