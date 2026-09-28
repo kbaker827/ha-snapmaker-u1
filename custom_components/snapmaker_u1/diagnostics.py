@@ -52,6 +52,17 @@ async def async_get_config_entry_diagnostics(
                 else False
             ),
         },
+        "camera": {
+            "snapshot_url": (
+                coordinator.client.camera_snapshot_url if coordinator.client else ""
+            ),
+            "stream_url": (
+                coordinator.client.camera_stream_url if coordinator.client else ""
+            ),
+            "moonraker_webcam": (
+                coordinator.client.webcam_info if coordinator.client else None
+            ),
+        },
         "print_job": {
             "state": data.print_stats.state if data else "unknown",
             "filename": data.print_stats.filename if data else "",

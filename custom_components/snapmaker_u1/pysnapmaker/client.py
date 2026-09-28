@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from typing import Any, Callable, Optional
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import aiohttp
 
@@ -60,6 +61,10 @@ _RE_TEMP_SENSOR = re.compile(r"^temperature_sensor\s+\S+")
 # "[webcam gui]" Moonraker config entry).
 _SCREEN_MIRROR_WEBCAM_TOKENS = ("gui", "screen")
 
+# Hostnames that only make sense from the printer itself. Moonraker webcam
+# entries sometimes use these, which would point Home Assistant at itself.
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+
 
 class SnapmakerClient:
     """Async client for the Snapmaker U1 Moonraker API.
@@ -99,6 +104,7 @@ class SnapmakerClient:
         # Initialised to None here; set properly after base_url is available.
         self._camera_stream_url: str | None = None
         self._camera_snapshot_url: str | None = None
+        self._webcam_info: dict[str, Any] | None = None
 
         # Reconnection backoff
         self._reconnect_delay = 5
@@ -130,6 +136,25 @@ class SnapmakerClient:
     @property
     def camera_snapshot_url(self) -> str:
         return self._camera_snapshot_url or f"{self.base_url}{CAMERA_SNAPSHOT_PATH}"
+
+    @property
+    def webcam_info(self) -> dict[str, Any] | None:
+        """Raw Moonraker entry of the discovered webcam, if any."""
+        return self._webcam_info
+
+    def resolve_url(self, url: str) -> str:
+        """Turn a Moonraker-provided URL into one reachable from Home Assistant.
+
+        Handles relative paths (``/webcam/?action=snapshot``, ``webcam/...``),
+        protocol-relative URLs, and absolute URLs pointing at a loopback
+        address, which only resolve on the printer itself.
+        """
+        resolved = urljoin(f"{self.base_url}/", url)
+        parts = urlsplit(resolved)
+        if parts.hostname in _LOOPBACK_HOSTS:
+            netloc = self.host if parts.port is None else f"{self.host}:{parts.port}"
+            resolved = urlunsplit(parts._replace(netloc=netloc))
+        return resolved
 
     @property
     def headers(self) -> dict[str, str]:
@@ -249,22 +274,15 @@ class SnapmakerClient:
                 )
             ]
             cam = (real_cameras or enabled)[0]
+            self._webcam_info = cam
             stream_url: str = cam.get("stream_url", "")
             snapshot_url: str = cam.get("snapshot_url", "")
+            # Moonraker may return relative paths (e.g. "/webcam/?action=stream")
+            # or full URLs, sometimes pointing at localhost on the printer.
             if stream_url:
-                # Moonraker may return relative paths (e.g. "/webcam/?action=stream")
-                # or full URLs (e.g. "http://host/webcam/?action=stream")
-                self._camera_stream_url = (
-                    stream_url
-                    if stream_url.startswith("http")
-                    else f"{self.base_url}{stream_url}"
-                )
+                self._camera_stream_url = self.resolve_url(stream_url)
             if snapshot_url:
-                self._camera_snapshot_url = (
-                    snapshot_url
-                    if snapshot_url.startswith("http")
-                    else f"{self.base_url}{snapshot_url}"
-                )
+                self._camera_snapshot_url = self.resolve_url(snapshot_url)
             _LOGGER.debug(
                 "Discovered webcam '%s': stream=%s snapshot=%s",
                 cam.get("name", "unknown"),
