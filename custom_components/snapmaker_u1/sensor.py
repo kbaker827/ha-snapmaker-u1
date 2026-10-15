@@ -11,7 +11,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, MANUFACTURER, MODEL
+from .const import DOMAIN, MANUFACTURER, MODEL, U1_EXTRUDER_COUNT
 from .coordinator import SnapmakerDataUpdateCoordinator
 from .definitions import (
     CHAMBER_SENSOR_TEMPLATE,
@@ -32,7 +32,13 @@ async def async_setup_entry(
 ) -> None:
     """Set up Snapmaker U1 sensors from a config entry."""
     coordinator: SnapmakerDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.async_add_entities_on_discovery(
+        async_add_entities, lambda: _build_entities(coordinator)
+    )
 
+
+def _build_entities(coordinator: SnapmakerDataUpdateCoordinator) -> list[SensorEntity]:
+    """Build fixed U1 sensors and any capabilities discovered since startup."""
     entities: list[SensorEntity] = []
 
     # Standard printer-level sensors
@@ -42,8 +48,8 @@ async def async_setup_entry(
 
     # Extruder sensors – one set per detected extruder
     extruder_count = coordinator.data.extruder_count if coordinator.data else 0
-    # Always create at least one extruder set (U1 always has at least one nozzle)
-    extruder_count = max(extruder_count, 1)
+    # The U1's four nozzles exist even before its first successful connection.
+    extruder_count = max(extruder_count, U1_EXTRUDER_COUNT)
 
     for i in range(extruder_count):
         extruder_key = "extruder" if i == 0 else f"extruder{i}"
@@ -120,7 +126,7 @@ async def async_setup_entry(
             )
         )
 
-    async_add_entities(entities)
+    return entities
 
 
 def _make_filament_value_fn(index: int):
@@ -275,10 +281,13 @@ class SnapmakerSensor(SnapmakerBaseEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
+        if not super().available:
+            return False
+
         try:
             return self.entity_description.available_fn(self)
         except Exception:
-            return True
+            return False
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

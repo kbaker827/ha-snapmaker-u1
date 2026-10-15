@@ -30,7 +30,15 @@ async def async_setup_entry(
 ) -> None:
     """Set up Snapmaker U1 binary sensors from a config entry."""
     coordinator: SnapmakerDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.async_add_entities_on_discovery(
+        async_add_entities, lambda: _build_entities(coordinator)
+    )
 
+
+def _build_entities(
+    coordinator: SnapmakerDataUpdateCoordinator,
+) -> list[BinarySensorEntity]:
+    """Include filament sensors discovered after an offline HA start."""
     entities: list[BinarySensorEntity] = [
         SnapmakerBinarySensor(coordinator, description)
         for description in PRINTER_BINARY_SENSORS
@@ -56,7 +64,7 @@ async def async_setup_entry(
             )
             entities.append(SnapmakerFilamentBinarySensor(coordinator, desc, key))
 
-    async_add_entities(entities)
+    return entities
 
 
 def _make_filament_value_fn(sensor_key: str):
@@ -114,10 +122,13 @@ class SnapmakerBinarySensor(SnapmakerBaseEntity, BinarySensorEntity):
 
     @property
     def available(self) -> bool:
+        if not super().available:
+            return False
+
         try:
             return self.entity_description.available_fn(self)
         except Exception:
-            return True
+            return False
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

@@ -3,6 +3,7 @@
 DOMAIN = "snapmaker_u1"
 MANUFACTURER = "Snapmaker"
 MODEL = "U1"
+U1_EXTRUDER_COUNT = 4
 
 CONF_HOST = "host"
 CONF_PORT = "port"

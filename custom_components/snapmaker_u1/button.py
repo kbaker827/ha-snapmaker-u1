@@ -124,13 +124,15 @@ class SnapmakerButton(SnapmakerBaseEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
+        if not super().available:
+            return False
         fn = self.entity_description.available_fn
         if fn is None:
             return True
         try:
             return bool(fn(self.coordinator))
         except Exception:
-            return True
+            return False
 
     async def async_press(self) -> None:
         """Handle button press."""

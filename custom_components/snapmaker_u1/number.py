@@ -21,7 +21,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, U1_EXTRUDER_COUNT
 from .coordinator import SnapmakerDataUpdateCoordinator
 from .definitions import chamber_label, chamber_object_name
 from .pysnapmaker.client import SnapmakerClient
@@ -106,7 +106,13 @@ async def async_setup_entry(
 ) -> None:
     """Set up Snapmaker U1 number entities from a config entry."""
     coordinator: SnapmakerDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.async_add_entities_on_discovery(
+        async_add_entities, lambda: _build_entities(coordinator)
+    )
 
+
+def _build_entities(coordinator: SnapmakerDataUpdateCoordinator) -> list[NumberEntity]:
+    """Build fixed controls and add discovered chamber heater controls later."""
     entities: list[NumberEntity] = []
 
     # Static entities (bed temp, fan speed, speed factor, flow rate)
@@ -115,7 +121,7 @@ async def async_setup_entry(
 
     # Per-extruder nozzle temperature setpoints
     extruder_count = max(
-        coordinator.data.extruder_count if coordinator.data else 0, 1
+        coordinator.data.extruder_count if coordinator.data else 0, U1_EXTRUDER_COUNT
     )
     for i in range(extruder_count):
         extruder_key = "extruder" if i == 0 else f"extruder{i}"
@@ -157,7 +163,7 @@ async def async_setup_entry(
         )
         entities.append(SnapmakerNumberEntity(coordinator, desc))
 
-    async_add_entities(entities)
+    return entities
 
 
 def _make_chamber_heater_value_fn(heater_key: str) -> Callable:
@@ -222,10 +228,12 @@ class SnapmakerNumberEntity(SnapmakerBaseEntity, NumberEntity):
 
     @property
     def available(self) -> bool:
+        if not super().available:
+            return False
         try:
             return self.entity_description.available_fn(self.coordinator)
         except Exception:
-            return True
+            return False
 
     async def async_set_native_value(self, value: float) -> None:
         """Handle the user changing the value in HA."""

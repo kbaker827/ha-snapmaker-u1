@@ -327,12 +327,19 @@ chamber_presets:
    - **Port**: `80` by default (Moonraker is proxied through nginx)
    - **API Key**: leave blank unless you have configured Moonraker authentication
 
-The integration tests the connection before saving. If it succeeds, all
-entities are created immediately.
+The integration tests the connection before saving a new printer. On subsequent
+Home Assistant starts, it also loads when the printer is switched off. The four
+nozzles and standard controls are created as unavailable until live data arrives;
+optional filament sensors and accessories are added after discovery.
+
+One background WebSocket connection loop retries after 5, 10, 20, 40 and then
+60 seconds, staying at a maximum of one attempt per minute while the printer
+is offline. There is no parallel HTTP polling loop. Once the printer is
+reachable, the integration fetches its initial state and capabilities and uses
+WebSocket push updates. Discovery runs again after reconnecting. Normal offline
+retries are logged at debug level, without a failed-setup status.
 
 - **Changed the printer's IP?** Use **⋮ → Reconfigure** on the integration.
-- **Polling interval**: **Configure** sets how often state is refreshed while
-  the WebSocket is unavailable.
 - **Temperature unit**: **Configure → Temperature unit** picks the unit for
   every printer temperature (sensors, setpoints, the dashboard card and its
   presets). It defaults to **°C**, the usual unit for 3D printing, even if

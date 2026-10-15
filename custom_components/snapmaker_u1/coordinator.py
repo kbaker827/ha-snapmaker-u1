@@ -2,21 +2,21 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
     CONF_API_KEY,
     CONF_HOST,
     CONF_PORT,
-    CONF_SCAN_INTERVAL,
     DEFAULT_PORT,
-    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
 from .pysnapmaker.client import SnapmakerClient
@@ -25,22 +25,16 @@ from .pysnapmaker.models import SnapmakerPrinterData
 
 _LOGGER = logging.getLogger(__name__)
 
-# Fallback polling interval used when the WebSocket connection drops
-_FALLBACK_POLL_INTERVAL = timedelta(seconds=30)
-
 
 class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]):
-    """Manages fetching Snapmaker U1 state, preferring WebSocket push updates."""
+    """Receive push updates; the client alone handles reconnection."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        scan_interval = timedelta(
-            seconds=entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-        )
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=scan_interval,
+            config_entry=entry,
         )
         self.entry = entry
         self._client: SnapmakerClient | None = None
@@ -51,7 +45,7 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
     # ------------------------------------------------------------------
 
     async def async_setup(self) -> bool:
-        """Create the client, test the connection, and start the WebSocket."""
+        """Load immediately, even while the printer is switched off."""
         host = self.entry.data[CONF_HOST]
         port = self.entry.data.get(CONF_PORT, DEFAULT_PORT)
         api_key = self.entry.data.get(CONF_API_KEY) or None
@@ -61,15 +55,17 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
         # Register push-update callback
         self._client.register_callback(self._async_push_update)
 
-        # Fetch initial data; returns False if unreachable
-        if not await self._client.async_init():
-            _LOGGER.error(
-                "Cannot connect to Snapmaker U1 at %s:%d", host, port
-            )
-            return False
-
-        # Seed coordinator with initial data so entities get values immediately
-        self.async_set_updated_data(self._client.data)
+        # Typed defaults let platforms create entities without network access.
+        # Do not publish them as a successful measurement.
+        self.data = self._client.data
+        device = dr.async_get(self.hass).async_get_device_by_identifier(
+            (DOMAIN, host), self.entry.entry_id
+        )
+        if device and device.name:
+            self.data.printer_name = device.name
+        if device and device.sw_version:
+            self.data.firmware_version = device.sw_version
+        self.last_update_success = False
 
         # Start WebSocket (reconnects automatically in the background)
         await self._client.async_start()
@@ -80,26 +76,72 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
         if self._client:
             self._client.remove_callback(self._async_push_update)
             await self._client.async_stop()
+        await super().async_shutdown()
 
     # ------------------------------------------------------------------
-    # Push / poll updates
+    # Push updates
     # ------------------------------------------------------------------
 
     async def _async_push_update(self, data: SnapmakerPrinterData) -> None:
         """Called by the WebSocket client when new data arrives."""
+        if self._client is None or not self._client.connected:
+            # A powered-off printer is expected. Notify entities without the
+            # error-level logging of async_set_update_error().
+            was_available = self.last_update_success
+            self.last_update_success = False
+            self.last_exception = UpdateFailed("Printer is offline")
+            if was_available:
+                self.async_update_listeners()
+            return
+        device_registry = dr.async_get(self.hass)
+        device = device_registry.async_get_device_by_identifier(
+            (DOMAIN, self.entry.data[CONF_HOST]), self.entry.entry_id
+        )
+        if device and (
+            device.name != data.printer_name
+            or device.sw_version != data.firmware_version
+        ):
+            device_registry.async_update_device(
+                device.id, name=data.printer_name, sw_version=data.firmware_version
+            )
         await self._fire_print_state_events(data)
         self.async_set_updated_data(data)
 
     async def _async_update_data(self) -> SnapmakerPrinterData:
-        """Fallback: poll via HTTP when WebSocket is not connected."""
-        if self._client is None:
-            raise UpdateFailed("Client not initialised")
-        if not self._client.connected:
-            try:
-                await self._client.fetch_state()
-            except Exception as exc:
-                raise UpdateFailed(f"HTTP poll failed: {exc}") from exc
+        """Return the current push snapshot without another network request."""
+        if self._client is None or not self._client.connected:
+            raise UpdateFailed("Printer is offline")
         return self._client.data
+
+    @callback
+    def async_add_entities_on_discovery(
+        self,
+        async_add_entities: AddEntitiesCallback,
+        factory: Callable[[], Iterable[Entity]],
+    ) -> None:
+        """Create known entities now and add newly discovered ones later."""
+        seen: set[str | None] = set()
+        previous_signature: tuple | None = None
+
+        @callback
+        def add_discovered_entities() -> None:
+            nonlocal previous_signature
+            if self._client is None:
+                return
+            signature = self._client.discovery_signature
+            if signature == previous_signature:
+                return
+            previous_signature = signature
+            entities = []
+            for entity in factory():
+                if entity.unique_id not in seen:
+                    seen.add(entity.unique_id)
+                    entities.append(entity)
+            if entities:
+                async_add_entities(entities)
+
+        self.entry.async_on_unload(self.async_add_listener(add_discovered_entities))
+        add_discovered_entities()
 
     # ------------------------------------------------------------------
     # HA event bus
@@ -125,7 +167,9 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
         # Attach device_id so automations can filter by device
         dev_reg = dr.async_get(self.hass)
         host = self.entry.data[CONF_HOST]
-        device = dev_reg.async_get_device(identifiers={(DOMAIN, host)})
+        device = dev_reg.async_get_device_by_identifier(
+            (DOMAIN, host), self.entry.entry_id
+        )
         if device:
             event_data["device_id"] = device.id
 

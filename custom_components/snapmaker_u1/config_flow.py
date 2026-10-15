@@ -18,10 +18,8 @@ from .const import (
     CONF_API_KEY,
     CONF_HOST,
     CONF_PORT,
-    CONF_SCAN_INTERVAL,
     CONF_TEMPERATURE_UNIT,
     DEFAULT_PORT,
-    DEFAULT_SCAN_INTERVAL,
     DEFAULT_TEMPERATURE_UNIT,
     DOMAIN,
     TEMP_UNIT_CELSIUS,
@@ -152,15 +150,8 @@ class SnapmakerOptionsFlow(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        current_interval = self._entry.options.get(
-            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
-        )
         schema = vol.Schema(
             {
-                vol.Optional(
-                    CONF_SCAN_INTERVAL,
-                    default=current_interval,
-                ): vol.All(vol.Coerce(int), vol.Range(min=10, max=300)),
                 vol.Optional(
                     CONF_TEMPERATURE_UNIT,
                     default=self._entry.options.get(

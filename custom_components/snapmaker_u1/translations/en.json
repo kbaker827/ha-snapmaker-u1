@@ -36,11 +36,9 @@
       "init": {
         "title": "Snapmaker U1 Options",
         "data": {
-          "scan_interval": "Fallback poll interval (seconds)",
           "temperature_unit": "Temperature unit"
         },
         "data_description": {
-          "scan_interval": "How often to poll the printer via HTTP when the WebSocket is disconnected (10–300 seconds).",
           "temperature_unit": "Unit for all printer temperatures. 3D printing normally uses °C, even if the rest of Home Assistant uses °F."
         }
       }

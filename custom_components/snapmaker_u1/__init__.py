@@ -6,7 +6,7 @@ import logging
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform, UnitOfTemperature
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
@@ -140,10 +140,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Snapmaker U1 from a config entry."""
     coordinator = SnapmakerDataUpdateCoordinator(hass, entry)
 
-    if not await coordinator.async_setup():
-        return False
+    await coordinator.async_setup()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
+    @callback
+    def apply_unit_to_discovered_entity(event) -> None:
+        """Also apply the preference to entities added after an offline start."""
+        if event.data.get("action") != "create":
+            return
+        entity = er.async_get(hass).async_get(event.data["entity_id"])
+        if entity and entity.config_entry_id == entry.entry_id:
+            _apply_temperature_unit(hass, entry)
+
+    entry.async_on_unload(
+        hass.bus.async_listen(
+            er.EVENT_ENTITY_REGISTRY_UPDATED, apply_unit_to_discovered_entity
+        )
+    )
 
     # Register services only once (first loaded entry)
     if not hass.services.has_service(DOMAIN, SERVICE_EXECUTE_GCODE):
@@ -152,7 +166,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _apply_temperature_unit(hass, entry)
 
-    # Reload the entry if options change (e.g. scan interval)
+    # Reload the entry if options change (e.g. temperature unit)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     return True
@@ -202,11 +216,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator: SnapmakerDataUpdateCoordinator = hass.data[DOMAIN].get(
         entry.entry_id
     )
-    if coordinator:
-        await coordinator.async_shutdown()
-
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
+        if coordinator:
+            await coordinator.async_shutdown()
         hass.data[DOMAIN].pop(entry.entry_id, None)
 
     # Unregister services when the last entry is removed

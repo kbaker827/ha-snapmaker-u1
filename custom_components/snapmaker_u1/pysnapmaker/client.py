@@ -26,7 +26,6 @@ from .const import (
     ENDPOINT_PRINTER_RESTART,
     ENDPOINT_SERVER_INFO,
     ENDPOINT_WEBCAMS_LIST,
-    KLIPPER_READY,
     KLIPPER_SHUTDOWN,
     PRINTER_OBJECTS,
     WS_ENDPOINT,
@@ -91,8 +90,8 @@ _LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1", "0.0.0.0")
 class SnapmakerClient:
     """Async client for the Snapmaker U1 Moonraker API.
 
-    Connects via WebSocket for push updates and falls back to HTTP polling
-    when the WebSocket is unavailable.
+    Connects via WebSocket for push updates. HTTP discovery is performed
+    only after connecting, without a second offline polling loop.
     """
 
     def __init__(
@@ -221,6 +220,18 @@ class SnapmakerClient:
         """Discovered chamber filter ``output_pin`` objects."""
         return list(self._chamber_filter_keys)
 
+    @property
+    def discovery_signature(self) -> tuple:
+        """Capabilities relevant to entity creation, without live measurements."""
+        return (
+            self._data.extruder_count,
+            self._has_filament_config,
+            tuple(self._filament_sensor_keys),
+            tuple(self._temp_sensor_keys),
+            tuple(self._chamber_heater_keys),
+            tuple(self._chamber_filter_keys),
+        )
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -234,8 +245,7 @@ class SnapmakerClient:
 
     async def async_init(self) -> bool:
         """Initialize session, test connection, and fetch initial state."""
-        if self._own_session:
-            self._session = aiohttp.ClientSession()
+        self._ensure_session()
         try:
             await self._fetch_printer_info()
             await self._discover_dynamic_objects()
@@ -245,11 +255,21 @@ class SnapmakerClient:
             self._connected = True
             return True
         except Exception as exc:
-            _LOGGER.error("Failed to initialise Snapmaker U1 client: %s", exc)
+            _LOGGER.debug("Failed to initialise Snapmaker U1 client: %s", exc)
             return False
+
+    def _ensure_session(self) -> None:
+        """Create one bounded session for this client's lifetime."""
+        if self._own_session and (self._session is None or self._session.closed):
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=10)
+            )
 
     async def async_start(self) -> None:
         """Start the WebSocket connection loop."""
+        if self._ws_task and not self._ws_task.done():
+            return
+        self._ensure_session()
         self._should_reconnect = True
         self._ws_task = asyncio.create_task(self._ws_loop())
 
@@ -396,16 +416,29 @@ class SnapmakerClient:
         while self._should_reconnect:
             try:
                 await self._ws_connect()
-                delay = self._reconnect_delay  # Reset on clean run
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                _LOGGER.warning(
-                    "WebSocket connection lost (%s). Reconnecting in %ds.", exc, delay
+                _LOGGER.debug(
+                    "WebSocket unavailable (%s); retrying in %ds", exc, delay
                 )
+            finally:
+                # Includes clean closes, failed handshakes and cancelled reads.
+                was_connected = self._connected
                 self._connected = False
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, self._max_reconnect_delay)
+                self._ws = None
+                for future in self._pending_requests.values():
+                    if not future.done():
+                        future.cancel()
+                self._pending_requests.clear()
+                await self._notify_callbacks()
+                if was_connected:
+                    delay = self._reconnect_delay
+            if not self._should_reconnect:
+                break
+            # A cleanly closed connection must not create a tight retry loop.
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, self._max_reconnect_delay)
 
     async def _ws_connect(self) -> None:
         """Open and maintain a single WebSocket connection."""
@@ -417,10 +450,18 @@ class SnapmakerClient:
             timeout=aiohttp.ClientWSTimeout(ws_close=10),
         ) as ws:
             self._ws = ws
+            # The socket handshake is the only reachability probe while off.
+            # Refresh discovery on every connection, including after an offline
+            # HA start or a printer firmware / Klipper restart.
+            await self._fetch_printer_info()
+            await self._discover_dynamic_objects()
+            await self._discover_webcams()
+            await self._fetch_printer_state()
+            await self.fetch_file_list()
+            await self._subscribe_objects()
             self._connected = True
             _LOGGER.info("Snapmaker U1 WebSocket connected (%s)", self.host)
-
-            await self._subscribe_objects()
+            await self._notify_callbacks()
 
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
@@ -429,7 +470,7 @@ class SnapmakerClient:
                     except Exception as exc:
                         _LOGGER.debug("Error handling WS message: %s", exc)
                 elif msg.type == aiohttp.WSMsgType.ERROR:
-                    _LOGGER.warning("WebSocket error: %s", ws.exception())
+                    _LOGGER.debug("WebSocket error: %s", ws.exception())
                     break
                 elif msg.type in (
                     aiohttp.WSMsgType.CLOSE,
@@ -437,9 +478,6 @@ class SnapmakerClient:
                     aiohttp.WSMsgType.CLOSED,
                 ):
                     break
-
-        self._ws = None
-        self._connected = False
 
     def _next_id(self) -> int:
         self._request_id += 1
@@ -479,8 +517,14 @@ class SnapmakerClient:
             await self._process_status(params[0])
 
         elif method == WS_NOTIFY_KLIPPY_READY:
-            self._data.klipper_state = KLIPPER_READY
-            self._data.klipper_message = "Klipper ready"
+            # Klipper may have been offline while Moonraker was reachable.
+            # Repeat discovery before subscribing to its now available objects.
+            await self._fetch_printer_info()
+            await self._discover_dynamic_objects()
+            await self._discover_webcams()
+            await self._fetch_printer_state()
+            await self.fetch_file_list()
+            await self._subscribe_objects()
             await self._notify_callbacks()
 
         elif method in (WS_NOTIFY_KLIPPY_SHUTDOWN, WS_NOTIFY_KLIPPY_DISCONNECTED):
@@ -765,6 +809,8 @@ class SnapmakerClient:
         }
         data = await self._get(ENDPOINT_PRINTER_OBJECTS_QUERY, params=params)
         status = data.get("result", {}).get("status", {})
+        if not isinstance(status, dict) or not status:
+            raise ValueError("Printer did not return a state snapshot")
         await self._process_status(status)
 
     async def fetch_state(self) -> None:

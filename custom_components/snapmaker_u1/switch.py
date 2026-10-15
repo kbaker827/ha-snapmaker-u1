@@ -28,10 +28,17 @@ async def async_setup_entry(
 ) -> None:
     """Set up Snapmaker U1 switch entities from a config entry."""
     coordinator: SnapmakerDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.async_add_entities_on_discovery(
+        async_add_entities, lambda: _build_entities(coordinator)
+    )
+
+
+def _build_entities(coordinator: SnapmakerDataUpdateCoordinator) -> list[SwitchEntity]:
+    """Include filters discovered after the printer comes online."""
     entities: list[SwitchEntity] = [WorkLightSwitch(coordinator)]
     filter_keys = coordinator.client.chamber_filter_keys if coordinator.client else []
     entities.extend(ChamberFilterSwitch(coordinator, key) for key in filter_keys)
-    async_add_entities(entities)
+    return entities
 
 
 class WorkLightSwitch(SnapmakerBaseEntity, SwitchEntity):
@@ -58,7 +65,11 @@ class WorkLightSwitch(SnapmakerBaseEntity, SwitchEntity):
 
     @property
     def available(self) -> bool:
-        return bool(self.coordinator.data and self.coordinator.data.is_ready)
+        return bool(
+            super().available
+            and self.coordinator.data
+            and self.coordinator.data.is_ready
+        )
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -117,7 +128,11 @@ class ChamberFilterSwitch(SnapmakerBaseEntity, SwitchEntity):
 
     @property
     def available(self) -> bool:
-        return bool(self.coordinator.data and self.coordinator.data.is_ready)
+        return bool(
+            super().available
+            and self.coordinator.data
+            and self.coordinator.data.is_ready
+        )
 
     async def async_turn_on(self, **kwargs) -> None:
         await self._set(True)

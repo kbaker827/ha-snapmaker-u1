@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, U1_EXTRUDER_COUNT
 from .coordinator import SnapmakerDataUpdateCoordinator
 from .sensor import SnapmakerBaseEntity
 
@@ -32,7 +32,9 @@ async def async_setup_entry(
     entities: list[SelectEntity] = [PrintFileSelect(coordinator)]
 
     # Add active tool selector only for multi-extruder setups
-    extruder_count = coordinator.data.extruder_count if coordinator.data else 0
+    extruder_count = max(
+        coordinator.data.extruder_count if coordinator.data else 0, U1_EXTRUDER_COUNT
+    )
     if extruder_count > 1:
         entities.append(ActiveToolSelect(coordinator, extruder_count))
 
@@ -70,7 +72,7 @@ class PrintFileSelect(SnapmakerBaseEntity, SelectEntity):
     @property
     def available(self) -> bool:
         """Available when printer is ready and file list is populated."""
-        if not self.coordinator.data:
+        if not super().available or not self.coordinator.data:
             return False
         return self.coordinator.data.is_ready and bool(
             self.coordinator.data.available_files
@@ -135,7 +137,11 @@ class ActiveToolSelect(SnapmakerBaseEntity, SelectEntity):
 
     @property
     def available(self) -> bool:
-        return bool(self.coordinator.data and self.coordinator.data.is_ready)
+        return bool(
+            super().available
+            and self.coordinator.data
+            and self.coordinator.data.is_ready
+        )
 
     async def async_select_option(self, option: str) -> None:
         """Switch to the selected tool."""
