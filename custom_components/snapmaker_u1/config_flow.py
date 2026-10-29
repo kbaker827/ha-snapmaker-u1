@@ -50,6 +50,10 @@ _STEP_USER_SCHEMA = vol.Schema(
 )
 
 
+def _popstatus_unique_id(host: str) -> str:
+    return f"popstatus_{host.strip().lower()}"
+
+
 class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Snapmaker U1."""
 
@@ -80,7 +84,7 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             host = user_input[CONF_HOST].strip()
-            await self.async_set_unique_id(f"popstatus_{host.lower()}")
+            await self.async_set_unique_id(_popstatus_unique_id(host))
             self._abort_if_unique_id_configured()
             if await PopStatusClient.test_connection(
                 host, async_get_clientsession(self.hass)
@@ -217,9 +221,18 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
         if user_input is not None:
             host = user_input[CONF_HOST].strip()
+            unique_id = _popstatus_unique_id(host)
+            # The add step uses the address to spot duplicates, so keep the ID
+            # in step with it and don't move onto another entry's address.
+            if any(
+                e.unique_id == unique_id and e.entry_id != entry.entry_id
+                for e in self.hass.config_entries.async_entries(DOMAIN)
+            ):
+                return self.async_abort(reason="already_configured")
             if await PopStatusClient.test_connection(
                 host, async_get_clientsession(self.hass)
             ):
+                self.hass.config_entries.async_update_entry(entry, unique_id=unique_id)
                 return self.async_update_reload_and_abort(
                     entry,
                     title=f"PopStatus ({host})",
