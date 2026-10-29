@@ -174,7 +174,28 @@ class SnapmakerU1Card extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._printers && !this._loading) this._loadPrinters();
+    else if (this._registryChanged()) this._scheduleReload();
     this._safeUpdate();
+  }
+
+  // The entity registry changes when the integration reloads, e.g. after a
+  // Top Cover is plugged in. Re-read the entity mapping so new entities show
+  // up without reloading the browser.
+  _registryKey() {
+    const hass = this._hass;
+    return hass.entities || Object.keys(hass.states).length;
+  }
+
+  _registryChanged() {
+    return this._loadedKey !== undefined && this._registryKey() !== this._loadedKey;
+  }
+
+  _scheduleReload() {
+    clearTimeout(this._reloadTimer);
+    // Wait for a reload's remove/add burst to settle first.
+    this._reloadTimer = setTimeout(() => {
+      if (!this._loading && this._registryChanged()) this._loadPrinters();
+    }, 1500);
   }
 
   // Home Assistant replaces a card that throws while updating with a blank
@@ -212,6 +233,7 @@ class SnapmakerU1Card extends HTMLElement {
     // Close the MJPEG stream so hidden cards don't keep the camera busy.
     this._connected = false;
     this._setCamera("");
+    clearTimeout(this._reloadTimer);
   }
 
   getCardSize() {
@@ -228,6 +250,7 @@ class SnapmakerU1Card extends HTMLElement {
 
   async _loadPrinters() {
     this._loading = true;
+    this._loadedKey = this._registryKey();
     try {
       const result = await this._hass.callWS({ type: `${DOMAIN}/entities` });
       this._printers = result.printers || [];
@@ -238,6 +261,7 @@ class SnapmakerU1Card extends HTMLElement {
     this._loading = false;
     this._signature = "";
     this._safeUpdate();
+    if (this._registryChanged()) this._scheduleReload();  // changed while loading
   }
 
   get _printer() {
@@ -675,7 +699,8 @@ class SnapmakerU1Card extends HTMLElement {
   _renderTopCover() {
     const selectId = this._eid("select.top_cover_mode_select");
     const select = selectId && this._hass.states[selectId];
-    if (!select) return "";
+    // "restored" = left in the registry after the cover was unplugged
+    if (!select || select.attributes.restored) return "";
     const disabled = select.state === "unavailable";
     const life = num(this._state("sensor.top_cover_filter_life"));
     const modes = [
