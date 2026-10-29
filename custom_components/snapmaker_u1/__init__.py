@@ -208,15 +208,15 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    coordinator: SnapmakerDataUpdateCoordinator = hass.data[DOMAIN].get(
-        entry.entry_id
+    # Unload the entities first so none of them use the client after it stops.
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if not unload_ok:
+        return False
+    coordinator: SnapmakerDataUpdateCoordinator | None = hass.data[DOMAIN].pop(
+        entry.entry_id, None
     )
     if coordinator:
         await coordinator.async_shutdown()
-
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
 
     # Unregister services when the last entry is removed
     if not hass.data.get(DOMAIN):

@@ -275,6 +275,10 @@ class SnapmakerSensor(SnapmakerBaseEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
+        # The coordinator turns unavailable when the printer can't be reached;
+        # without this check the last readings kept showing as live.
+        if not super().available:
+            return False
         try:
             return self.entity_description.available_fn(self)
         except Exception:

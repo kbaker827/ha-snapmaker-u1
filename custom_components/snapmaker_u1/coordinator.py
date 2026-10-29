@@ -6,7 +6,7 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -61,6 +61,7 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
         # Register push-update callback
         self._client.register_callback(self._async_push_update)
         self._client.register_objects_changed_callback(self._schedule_reload)
+        self._client.register_disconnect_callback(self._on_ws_disconnected)
 
         # Fetch initial data; returns False if unreachable
         if not await self._client.async_init():
@@ -86,11 +87,19 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
                 self.hass.config_entries.async_reload(self.entry.entry_id)
             )
 
+    @callback
+    def _on_ws_disconnected(self) -> None:
+        """Poll right away so entities go unavailable if the printer is gone."""
+        self.hass.async_create_task(self.async_request_refresh())
+
     async def async_shutdown(self) -> None:
         """Clean up client resources."""
         if self._client:
             self._client.remove_callback(self._async_push_update)
             await self._client.async_stop()
+        parent_shutdown = getattr(super(), "async_shutdown", None)
+        if parent_shutdown is not None:  # Home Assistant 2024.2+
+            await parent_shutdown()
 
     # ------------------------------------------------------------------
     # Push / poll updates
@@ -136,7 +145,11 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
         # Attach device_id so automations can filter by device
         dev_reg = dr.async_get(self.hass)
         host = self.entry.data[CONF_HOST]
-        device = dev_reg.async_get_device(identifiers={(DOMAIN, host)})
+        get_by_identifier = getattr(dev_reg, "async_get_device_by_identifier", None)
+        if get_by_identifier is not None:
+            device = get_by_identifier((DOMAIN, host), self.entry.entry_id)
+        else:  # older Home Assistant
+            device = dev_reg.async_get_device(identifiers={(DOMAIN, host)})
         if device:
             event_data["device_id"] = device.id
 

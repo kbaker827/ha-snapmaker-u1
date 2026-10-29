@@ -390,7 +390,7 @@ automation:
 | Symptom | Fix |
 |---|---|
 | "Cannot connect" during setup | Verify the IP, confirm the printer is on and that Fluidd loads in your browser at that address |
-| Sensors stuck at `unavailable` | Check Klipper logs via Fluidd; the WebSocket may be reconnecting |
+| Everything shows `unavailable` | The printer can't be reached (switched off, or off the network). Entities come back by themselves once it answers again; if they don't, check Klipper logs via Fluidd |
 | Printer was off when Home Assistant started | Nothing to do: the integration shows *Retrying setup* and connects by itself once the printer is back on. If new heaters or sensors appear after Klipper starts, it reloads itself to add them |
 | Camera shows no image / "500: Internal Server Error" snapshot | The integration couldn't get an image from the printer. Open `http://<printer-ip>/webcam/` and `http://<printer-ip>/webcam/snapshot.jpg` in a browser (use the **printer's** IP). If neither shows the camera, the printer isn't exposing its camera over HTTP. The Snapmaker app can reach the camera through its own service, so seeing the feed there doesn't guarantee an HTTP endpoint exists. The [Extended Firmware](https://github.com/paxx12-snapmaker-u1/SnapmakerU1-Extended-Firmware) provides `/webcam/snapshot.jpg` and a live stream. Check the camera entity's `snapshot_url` / `stream_url` attributes and the Home Assistant log (it lists every URL tried) |
 | Dashboard card not in the card picker / "Custom element doesn't exist" | Update to 1.10.0 or later, **restart Home Assistant**, then hard-refresh the browser (Ctrl+Shift+R); in the mobile app, use **Reset frontend cache** in the Companion app settings. The integration adds `/snapmaker_u1_static/snapmaker-u1-card.js` to Settings → Dashboards → ⋮ → **Resources** for you (and updates an entry you added by hand). Add the card to a dashboard you created (Settings → Dashboards); newer Home Assistant versions generate the default *Overview* automatically. YAML-mode dashboards: add that URL under `lovelace: resources:` as a `module` |
@@ -405,7 +405,8 @@ automation:
 
 - **Protocol**: Moonraker WebSocket (JSON-RPC 2.0) + HTTP REST
 - **IoT class**: `local_push` (push updates via WebSocket, no cloud dependency)
-- **Reconnection**: Exponential back-off from 5 s to 60 s
+- **Reconnection**: Exponential back-off from 5 s to 60 s, always waiting between attempts (even when the printer closes the socket itself)
+- **Availability**: When the connection drops, the integration polls straight away; if the printer doesn't answer, every entity (camera included) shows `unavailable` instead of its last value
 - **Extruders**: Up to 4 nozzles auto-detected (T0–T3)
 - **Dashboard card**: served by the integration from `/snapmaker_u1_static/`
   and registered as a dashboard resource (an extra frontend module in YAML

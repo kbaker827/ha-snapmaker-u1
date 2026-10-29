@@ -139,7 +139,10 @@ class SnapmakerClient:
         # Klipper objects that decide which entities exist, as seen at setup.
         self._entity_objects: frozenset[str] = frozenset()
         self._objects_changed_callbacks: list[Callable] = []
+        self._disconnect_callbacks: list[Callable] = []
         self._ws_connected_once = False
+        # Set once a WebSocket connection is up and subscribed.
+        self._ws_session_established = False
         self._file_list_fetched_at: float | None = None
         self._file_list_refresh_task: asyncio.Task | None = None
 
@@ -339,6 +342,27 @@ class SnapmakerClient:
             or o == FILAMENT_CONFIG_OBJECT
         )
 
+    def register_disconnect_callback(self, callback: Callable) -> None:
+        """Call `callback` (no arguments) when the WebSocket connection drops."""
+        self._disconnect_callbacks.append(callback)
+
+    def _on_disconnected(self) -> None:
+        """Mark the WebSocket down, fail pending requests and tell listeners."""
+        was_connected = self._connected
+        self._ws = None
+        self._connected = False
+        for future in self._pending_requests.values():
+            if not future.done():
+                future.cancel()
+        self._pending_requests.clear()
+        if not was_connected or not self._should_reconnect:  # not on shutdown
+            return
+        for cb in list(self._disconnect_callbacks):
+            try:
+                cb()
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.debug("Error in disconnect callback: %s", exc)
+
     def register_objects_changed_callback(self, callback: Callable) -> None:
         """Call `callback` when the printer's Klipper objects differ from setup.
 
@@ -464,18 +488,32 @@ class SnapmakerClient:
         """Main WebSocket reconnection loop."""
         delay = self._reconnect_delay
         while self._should_reconnect:
+            self._ws_session_established = False
             try:
                 await self._ws_connect()
-                delay = self._reconnect_delay  # Reset on clean run
+                reason = "closed by the printer"
+            except asyncio.CancelledError:
+                self._on_disconnected()
+                break
+            except Exception as exc:  # noqa: BLE001
+                reason = str(exc) or type(exc).__name__
+            self._on_disconnected()
+            if not self._should_reconnect:
+                break
+            # Back off only while connecting keeps failing; a connection that
+            # was up starts again from the shortest delay. Always wait, so a
+            # printer that accepts and immediately closes the socket can't
+            # cause a tight reconnect loop.
+            if self._ws_session_established:
+                delay = self._reconnect_delay
+            _LOGGER.warning(
+                "WebSocket connection lost (%s). Reconnecting in %ds.", reason, delay
+            )
+            try:
+                await asyncio.sleep(delay)
             except asyncio.CancelledError:
                 break
-            except Exception as exc:
-                _LOGGER.warning(
-                    "WebSocket connection lost (%s). Reconnecting in %ds.", exc, delay
-                )
-                self._connected = False
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, self._max_reconnect_delay)
+            delay = min(delay * 2, self._max_reconnect_delay)
 
     async def _ws_connect(self) -> None:
         """Open and maintain a single WebSocket connection."""
@@ -491,6 +529,7 @@ class SnapmakerClient:
             _LOGGER.info("Snapmaker U1 WebSocket connected (%s)", self.host)
 
             await self._subscribe_objects()
+            self._ws_session_established = True
             if self._ws_connected_once:
                 # Reconnected (e.g. the printer was switched off and on):
                 # refresh state and pick up objects that weren't there before.
@@ -513,9 +552,6 @@ class SnapmakerClient:
                     aiohttp.WSMsgType.CLOSED,
                 ):
                     break
-
-        self._ws = None
-        self._connected = False
 
     def _next_id(self) -> int:
         self._request_id += 1

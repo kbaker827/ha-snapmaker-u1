@@ -124,6 +124,8 @@ class SnapmakerButton(SnapmakerBaseEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
+        if not super().available:
+            return False
         fn = self.entity_description.available_fn
         if fn is None:
             return True
