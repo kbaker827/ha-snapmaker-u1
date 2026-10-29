@@ -15,6 +15,7 @@ from homeassistant.helpers.aiohttp_client import (
 )
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, MANUFACTURER, MODEL
 from .pysnapmaker.const import CAMERA_SNAPSHOT_PATH, CAMERA_STREAM_PATH
@@ -51,7 +52,7 @@ async def async_setup_entry(
     async_add_entities([SnapmakerCamera(hass, coordinator)])
 
 
-class SnapmakerCamera(Camera):
+class SnapmakerCamera(CoordinatorEntity[SnapmakerDataUpdateCoordinator], Camera):
     """Snapshot-based camera entity for the Snapmaker U1 webcam.
 
     Uses ``async_camera_image`` to fetch JPEG stills from the webcam
@@ -72,7 +73,9 @@ class SnapmakerCamera(Camera):
         hass: HomeAssistant,
         coordinator: SnapmakerDataUpdateCoordinator,
     ) -> None:
-        super().__init__()
+        # Follow the coordinator's availability (offline printer -> unavailable)
+        CoordinatorEntity.__init__(self, coordinator)
+        Camera.__init__(self)
         self._coordinator = coordinator
         self._hass = hass
         host = coordinator.entry.data["host"]
@@ -94,7 +97,7 @@ class SnapmakerCamera(Camera):
 
     @property
     def is_streaming(self) -> bool:
-        return self._coordinator.data.is_ready if self._coordinator.data else False
+        return bool(self.available and self._coordinator.data and self._coordinator.data.is_ready)
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:
@@ -174,7 +177,7 @@ class SnapmakerCamera(Camera):
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return a single JPEG image from the webcam."""
-        if self._client is None:
+        if not self.available or self._client is None:
             return None
         session = async_get_clientsession(self._hass)
         errors: list[str] = []
@@ -216,8 +219,8 @@ class SnapmakerCamera(Camera):
         Falls back to Home Assistant's default behaviour (a stream built from
         repeated snapshots) when no multipart MJPEG stream is available.
         """
-        if self._client is None:
-            return await super().handle_async_mjpeg_stream(request)
+        if not self.available or self._client is None:
+            raise web.HTTPServiceUnavailable(reason="Printer is offline")
         session = async_get_clientsession(self._hass)
         stream_url = self._client.camera_stream_url
         try:

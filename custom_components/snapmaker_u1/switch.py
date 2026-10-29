@@ -58,7 +58,9 @@ class WorkLightSwitch(SnapmakerBaseEntity, SwitchEntity):
 
     @property
     def available(self) -> bool:
-        return bool(self.coordinator.data and self.coordinator.data.is_ready)
+        return bool(
+            super().available and self.coordinator.data and self.coordinator.data.is_ready
+        )
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -117,7 +119,9 @@ class ChamberFilterSwitch(SnapmakerBaseEntity, SwitchEntity):
 
     @property
     def available(self) -> bool:
-        return bool(self.coordinator.data and self.coordinator.data.is_ready)
+        return bool(
+            super().available and self.coordinator.data and self.coordinator.data.is_ready
+        )
 
     async def async_turn_on(self, **kwargs) -> None:
         await self._set(True)

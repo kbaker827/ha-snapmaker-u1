@@ -222,6 +222,8 @@ class SnapmakerNumberEntity(SnapmakerBaseEntity, NumberEntity):
 
     @property
     def available(self) -> bool:
+        if not super().available:
+            return False
         try:
             return self.entity_description.available_fn(self.coordinator)
         except Exception:
