@@ -191,10 +191,17 @@ class SnapmakerU1Card extends HTMLElement {
   }
 
   _scheduleReload() {
+    // Restart the wait only when the registry changed again, not on every
+    // state update (those arrive constantly while printing).
+    const key = this._registryKey();
+    if (this._reloadTimer && key === this._scheduledKey) return;
+    this._scheduledKey = key;
     clearTimeout(this._reloadTimer);
     // Wait for a reload's remove/add burst to settle first.
     this._reloadTimer = setTimeout(() => {
-      if (!this._loading && this._registryChanged()) this._loadPrinters();
+      this._reloadTimer = null;
+      if (this._loading) this._scheduleReload();
+      else if (this._registryChanged()) this._loadPrinters();
     }, 1500);
   }
 
@@ -234,6 +241,7 @@ class SnapmakerU1Card extends HTMLElement {
     this._connected = false;
     this._setCamera("");
     clearTimeout(this._reloadTimer);
+    this._reloadTimer = null;
   }
 
   getCardSize() {
