@@ -60,11 +60,12 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
 
         # Register push-update callback
         self._client.register_callback(self._async_push_update)
+        self._client.register_objects_changed_callback(self._schedule_reload)
 
         # Fetch initial data; returns False if unreachable
         if not await self._client.async_init():
-            _LOGGER.error(
-                "Cannot connect to Snapmaker U1 at %s:%d", host, port
+            _LOGGER.warning(
+                "Cannot connect to Snapmaker U1 at %s:%d; will retry", host, port
             )
             return False
 
@@ -74,6 +75,16 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
         # Start WebSocket (reconnects automatically in the background)
         await self._client.async_start()
         return True
+
+    def _schedule_reload(self) -> None:
+        """Reload the entry so entities match the printer's objects."""
+        schedule = getattr(self.hass.config_entries, "async_schedule_reload", None)
+        if schedule is not None:
+            schedule(self.entry.entry_id)
+        else:  # Home Assistant < 2024.2
+            self.hass.async_create_task(
+                self.hass.config_entries.async_reload(self.entry.entry_id)
+            )
 
     async def async_shutdown(self) -> None:
         """Clean up client resources."""

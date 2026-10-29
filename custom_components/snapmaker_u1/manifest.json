@@ -3,10 +3,10 @@
   "name": "Snapmaker U1",
   "codeowners": [],
   "config_flow": true,
-  "dependencies": ["frontend", "http", "websocket_api"],
+  "dependencies": ["frontend", "http", "lovelace", "websocket_api"],
   "documentation": "https://github.com/kbaker827/ha-snapmaker-u1",
   "homeassistant": "2024.1.0",
   "iot_class": "local_push",
   "requirements": ["aiohttp>=3.9.0"],
-  "version": "1.9.1"
+  "version": "1.10.0"
 }

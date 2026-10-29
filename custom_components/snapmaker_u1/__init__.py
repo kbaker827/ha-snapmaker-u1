@@ -7,7 +7,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform, UnitOfTemperature
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.typing import ConfigType
@@ -20,7 +20,11 @@ from .const import (
     TEMP_UNIT_FAHRENHEIT,
 )
 from .coordinator import SnapmakerDataUpdateCoordinator
-from .frontend import async_register_frontend
+from .frontend import (
+    async_ensure_card_resource,
+    async_register_frontend,
+    async_remove_lovelace_resource,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -141,7 +145,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = SnapmakerDataUpdateCoordinator(hass, entry)
 
     if not await coordinator.async_setup():
-        return False
+        # Printer off or unreachable: Home Assistant retries setup with
+        # back-off, so the integration recovers on its own once it's back.
+        raise ConfigEntryNotReady(
+            f"Cannot connect to Snapmaker U1 at {entry.data.get('host')}"
+        )
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
@@ -151,6 +159,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _apply_temperature_unit(hass, entry)
+    await async_ensure_card_resource(hass)
 
     # Reload the entry if options change (e.g. scan interval)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
@@ -220,3 +229,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.services.async_remove(DOMAIN, svc)
 
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove the dashboard resource when the last printer is removed."""
+    others = [
+        e for e in hass.config_entries.async_entries(DOMAIN) if e.entry_id != entry.entry_id
+    ]
+    if not others:
+        await async_remove_lovelace_resource(hass)
