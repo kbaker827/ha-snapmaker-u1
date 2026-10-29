@@ -151,8 +151,10 @@ is redacted automatically.
 ## Dashboard card
 
 The integration ships its own dashboard card, styled like the
-[Printer Tools](https://github.com/62fixolab/Printer-Tools-App) app. It loads
-automatically, so there's nothing extra to install or add as a resource.
+[Printer Tools](https://github.com/62fixolab/Printer-Tools-App) app. The
+integration adds it to your dashboard resources automatically (Settings →
+Dashboards → ⋮ → Resources), so there's nothing extra to install. If you manage
+dashboards in YAML mode, it's loaded as an extra frontend module instead.
 
 **Edit dashboard → Add card → search "Snapmaker U1"**, or in YAML:
 
@@ -389,8 +391,9 @@ automation:
 |---|---|
 | "Cannot connect" during setup | Verify the IP, confirm the printer is on and that Fluidd loads in your browser at that address |
 | Sensors stuck at `unavailable` | Check Klipper logs via Fluidd; the WebSocket may be reconnecting |
+| Printer was off when Home Assistant started | Nothing to do: the integration shows *Retrying setup* and connects by itself once the printer is back on. If new heaters or sensors appear after Klipper starts, it reloads itself to add them |
 | Camera shows no image / "500: Internal Server Error" snapshot | The integration couldn't get an image from the printer. Open `http://<printer-ip>/webcam/` and `http://<printer-ip>/webcam/snapshot.jpg` in a browser (use the **printer's** IP). If neither shows the camera, the printer isn't exposing its camera over HTTP. The Snapmaker app can reach the camera through its own service, so seeing the feed there doesn't guarantee an HTTP endpoint exists. The [Extended Firmware](https://github.com/paxx12-snapmaker-u1/SnapmakerU1-Extended-Firmware) provides `/webcam/snapshot.jpg` and a live stream. Check the camera entity's `snapshot_url` / `stream_url` attributes and the Home Assistant log (it lists every URL tried) |
-| Dashboard card not in the card picker / "Custom element doesn't exist" | The card needs version 1.5.0 or later. 1) In HACS, open Snapmaker U1 → ⋮ → **Redownload** (or Update). 2) **Restart Home Assistant** (a reload isn't enough). 3) Hard-refresh the browser (Ctrl+Shift+R); in the mobile app, use **Reset frontend cache** in the Companion app settings. Then search "snapmaker" in **Add card**. Still missing? Add it by hand: Settings → Dashboards → ⋮ → **Resources** → Add `/snapmaker_u1_static/snapmaker-u1-card.js` as a *JavaScript module* |
+| Dashboard card not in the card picker / "Custom element doesn't exist" | Update to 1.10.0 or later, **restart Home Assistant**, then hard-refresh the browser (Ctrl+Shift+R); in the mobile app, use **Reset frontend cache** in the Companion app settings. The integration adds `/snapmaker_u1_static/snapmaker-u1-card.js` to Settings → Dashboards → ⋮ → **Resources** for you (and updates an entry you added by hand). Add the card to a dashboard you created (Settings → Dashboards); newer Home Assistant versions generate the default *Overview* automatically. YAML-mode dashboards: add that URL under `lovelace: resources:` as a `module` |
 | Card shows no nozzle tiles | Update to 1.7.2 or later |
 | Print File shows "Unavailable" | Update to 1.7.1 or later (older versions misread the printer's file list). It's also unavailable while the printer isn't ready or has no files in its storage |
 | Panda Breath entities missing | Enable it in the printer's Firmware Config page first (Extended Firmware only), then reload the integration |
@@ -405,8 +408,11 @@ automation:
 - **Reconnection**: Exponential back-off from 5 s to 60 s
 - **Extruders**: Up to 4 nozzles auto-detected (T0–T3)
 - **Dashboard card**: served by the integration from `/snapmaker_u1_static/`
-  and loaded on every dashboard; it reads entities through the
-  `snapmaker_u1/entities` websocket command
+  and registered as a dashboard resource (an extra frontend module in YAML
+  mode); it reads entities through the `snapmaker_u1/entities` websocket command
+- **File list**: kept up to date from Moonraker's `notify_filelist_changed`
+  details; a full re-fetch only happens for bulk changes, at most once a minute
+- **Startup**: if the printer is unreachable, setup is retried automatically
 - **HA version**: Home Assistant 2024.1+
 - **Icon**: shipped in `custom_components/snapmaker_u1/brand/` (light and dark,
   256 px and 512 px), which Home Assistant 2026.3+ uses automatically. Older

@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from typing import Any, Callable, Optional
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
@@ -60,6 +61,7 @@ _LOGGER = logging.getLogger(__name__)
 # setups use filament_switch_sensor. Both report enabled/filament_detected.
 _RE_FILAMENT_SENSOR = re.compile(r"^filament_(switch|motion)_sensor\s+\S+")
 _RE_TEMP_SENSOR = re.compile(r"^temperature_sensor\s+\S+")
+_RE_EXTRUDER = re.compile(r"^extruder\d*$")
 # Chamber heaters such as the BIQU Panda Breath or DragonBreath, which the U1
 # Extended Firmware exposes to Klipper as a heater_generic.
 _RE_CHAMBER_HEATER = re.compile(r"^heater_generic\s+\S+")
@@ -84,6 +86,16 @@ FILAMENT_CONFIG_FIELDS = (
     "filament_exist",
     "filament_official",
 )
+
+# File-list handling. Moonraker reports each change with its details, so the
+# cached list is updated from those; a full re-fetch is only done for bulk
+# changes, at most this often. Some firmware (e.g. Extended Firmware) emits
+# notify_filelist_changed in response to a list request, which turned an
+# unconditional re-fetch into a busy loop (issue #28).
+FILE_LIST_MIN_REFRESH_INTERVAL = 60  # seconds
+# Bulk notifications arriving this soon after our own fetch are its echo.
+FILE_LIST_ECHO_WINDOW = 5  # seconds
+GCODE_EXTENSIONS = (".gcode", ".g", ".gco", ".ufp")
 
 _LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "::1", "0.0.0.0")
 
@@ -124,6 +136,12 @@ class SnapmakerClient:
         self._chamber_heater_keys: list[str] = []
         self._chamber_filter_keys: list[str] = []
         self._has_filament_config = False
+        # Klipper objects that decide which entities exist, as seen at setup.
+        self._entity_objects: frozenset[str] = frozenset()
+        self._objects_changed_callbacks: list[Callable] = []
+        self._ws_connected_once = False
+        self._file_list_fetched_at: float | None = None
+        self._file_list_refresh_task: asyncio.Task | None = None
 
         # Camera URLs – populated by webcam discovery; fall back to defaults.
         # Initialised to None here; set properly after base_url is available.
@@ -245,7 +263,10 @@ class SnapmakerClient:
             self._connected = True
             return True
         except Exception as exc:
-            _LOGGER.error("Failed to initialise Snapmaker U1 client: %s", exc)
+            _LOGGER.warning("Failed to initialise Snapmaker U1 client: %s", exc)
+            # Don't leak the session; Home Assistant will retry setup later.
+            if self._own_session and self._session and not self._session.closed:
+                await self._session.close()
             return False
 
     async def async_start(self) -> None:
@@ -256,6 +277,8 @@ class SnapmakerClient:
     async def async_stop(self) -> None:
         """Stop all connections and clean up."""
         self._should_reconnect = False
+        if self._file_list_refresh_task and not self._file_list_refresh_task.done():
+            self._file_list_refresh_task.cancel()
         if self._ws and not self._ws.closed:
             await self._ws.close()
         if self._ws_task and not self._ws_task.done():
@@ -289,6 +312,7 @@ class SnapmakerClient:
                 o for o in objects if _RE_CHAMBER_FILTER.match(o)
             ]
             self._has_filament_config = FILAMENT_CONFIG_OBJECT in objects
+            self._entity_objects = self._entity_objects_from(objects)
             _LOGGER.debug(
                 "Discovered filament sensors: %s; extra temp sensors: %s; "
                 "chamber heaters: %s; chamber filters: %s",
@@ -300,6 +324,52 @@ class SnapmakerClient:
         except Exception as exc:
             _LOGGER.debug("Could not discover dynamic printer objects: %s", exc)
         await self._fetch_chamber_heater_limits()
+
+    @staticmethod
+    def _entity_objects_from(objects: list[str]) -> frozenset[str]:
+        """The subset of Klipper objects that decides which entities exist."""
+        return frozenset(
+            o
+            for o in objects
+            if _RE_EXTRUDER.match(o)
+            or _RE_FILAMENT_SENSOR.match(o)
+            or _RE_TEMP_SENSOR.match(o)
+            or _RE_CHAMBER_HEATER.match(o)
+            or _RE_CHAMBER_FILTER.match(o)
+            or o == FILAMENT_CONFIG_OBJECT
+        )
+
+    def register_objects_changed_callback(self, callback: Callable) -> None:
+        """Call `callback` when the printer's Klipper objects differ from setup.
+
+        Happens when Home Assistant set up while Klipper was still starting
+        (so some heaters/sensors weren't listed yet), or after the printer's
+        configuration changed. The integration reloads to pick them up.
+        """
+        self._objects_changed_callbacks.append(callback)
+
+    async def _check_objects_changed(self) -> None:
+        try:
+            data = await self._get(ENDPOINT_PRINTER_OBJECTS_LIST)
+            objects: list[str] = data.get("result", {}).get("objects", [])
+        except Exception as exc:
+            _LOGGER.debug("Could not re-check printer objects: %s", exc)
+            return
+        current = self._entity_objects_from(objects)
+        # An empty list means Klipper isn't ready yet; wait for the next check.
+        if not current or current == self._entity_objects:
+            return
+        _LOGGER.info(
+            "Snapmaker U1 printer objects changed (added %s, removed %s); reloading",
+            sorted(current - self._entity_objects),
+            sorted(self._entity_objects - current),
+        )
+        self._entity_objects = current
+        for cb in list(self._objects_changed_callbacks):
+            try:
+                cb()
+            except Exception as exc:
+                _LOGGER.debug("Error in objects-changed callback: %s", exc)
 
     async def _fetch_chamber_heater_limits(self) -> None:
         """Read each chamber heater's min_temp / max_temp from the Klipper config."""
@@ -421,6 +491,12 @@ class SnapmakerClient:
             _LOGGER.info("Snapmaker U1 WebSocket connected (%s)", self.host)
 
             await self._subscribe_objects()
+            if self._ws_connected_once:
+                # Reconnected (e.g. the printer was switched off and on):
+                # refresh state and pick up objects that weren't there before.
+                await self._check_objects_changed()
+                await self.fetch_file_list()
+            self._ws_connected_once = True
 
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
@@ -482,6 +558,10 @@ class SnapmakerClient:
             self._data.klipper_state = KLIPPER_READY
             self._data.klipper_message = "Klipper ready"
             await self._notify_callbacks()
+            # Klipper restarted: resubscribe (Moonraker drops subscriptions) and
+            # check whether new heaters/sensors appeared.
+            await self._subscribe_objects()
+            await self._check_objects_changed()
 
         elif method in (WS_NOTIFY_KLIPPY_SHUTDOWN, WS_NOTIFY_KLIPPY_DISCONNECTED):
             self._data.klipper_state = KLIPPER_SHUTDOWN
@@ -490,8 +570,8 @@ class SnapmakerClient:
 
         elif method == WS_NOTIFY_FILELIST_CHANGED:
             # A file was uploaded, deleted or moved on the printer
-            await self.fetch_file_list()
-            await self._notify_callbacks()
+            if await self._apply_file_list_change(params):
+                await self._notify_callbacks()
 
         elif method == WS_NOTIFY_HISTORY_CHANGED:
             # A print just finished; refresh state and file list
@@ -771,8 +851,85 @@ class SnapmakerClient:
         """Public wrapper – refresh printer state via HTTP."""
         await self._fetch_printer_state()
 
+    async def _apply_file_list_change(self, params: Any) -> bool:
+        """Update the cached file list from a notify_filelist_changed payload.
+
+        Returns True when the list changed. Never re-fetches the whole list for
+        single-file events, and only schedules a rate-limited refresh for bulk
+        events (root_update, move_dir, unknown actions).
+        """
+        info = params[0] if isinstance(params, list) and params and isinstance(params[0], dict) else {}
+        action = info.get("action", "")
+        item = info.get("item") if isinstance(info.get("item"), dict) else {}
+        source = info.get("source_item") if isinstance(info.get("source_item"), dict) else {}
+        if item.get("root", "gcodes") != "gcodes" and source.get("root", "gcodes") != "gcodes":
+            return False  # config files, logs, timelapses, ...
+        path = item.get("path") if isinstance(item.get("path"), str) else ""
+
+        def is_gcode(name: str) -> bool:
+            return bool(name) and name.lower().endswith(GCODE_EXTENSIONS)
+
+        files = list(self._data.available_files)
+        if action in ("create_file", "modify_file"):
+            if not is_gcode(path):
+                return False  # thumbnails, metadata, ...
+            if path in files:
+                files.remove(path)
+            files.insert(0, path)  # newest first, like Moonraker's list
+        elif action == "delete_file":
+            if path not in files:
+                return False
+            files.remove(path)
+        elif action == "move_file":
+            src = source.get("path") if isinstance(source.get("path"), str) else ""
+            if src in files:
+                files.remove(src)
+            if is_gcode(path) and item.get("root", "gcodes") == "gcodes":
+                if path in files:
+                    files.remove(path)
+                files.insert(0, path)
+        elif action == "create_dir":
+            return False
+        elif action == "delete_dir":
+            prefix = path.rstrip("/") + "/"
+            files = [f for f in files if not f.startswith(prefix)]
+        else:
+            # root_update, move_dir or something new: refresh the full list,
+            # unless this is just the echo of our own request.
+            if (
+                self._file_list_fetched_at is not None
+                and time.monotonic() - self._file_list_fetched_at < FILE_LIST_ECHO_WINDOW
+            ):
+                return False
+            self._schedule_file_list_refresh()
+            return False
+
+        if files == self._data.available_files:
+            return False
+        self._data.available_files = files
+        return True
+
+    def _schedule_file_list_refresh(self) -> None:
+        """Re-fetch the file list once, no sooner than the minimum interval."""
+        if self._file_list_refresh_task and not self._file_list_refresh_task.done():
+            return
+        delay = 0.0
+        if self._file_list_fetched_at is not None:
+            delay = max(
+                0.0,
+                self._file_list_fetched_at + FILE_LIST_MIN_REFRESH_INTERVAL - time.monotonic(),
+            )
+
+        async def refresh() -> None:
+            await asyncio.sleep(delay)
+            await self.fetch_file_list()
+            await self._notify_callbacks()
+
+        self._file_list_refresh_task = asyncio.create_task(refresh())
+
     async def fetch_file_list(self) -> None:
         """Fetch available G-code files and update the data model."""
+        self._file_list_fetched_at = time.monotonic()
         try:
             data = await self._get(ENDPOINT_FILES_LIST)
             files = data.get("result", [])
@@ -788,6 +945,8 @@ class SnapmakerClient:
                 if isinstance(name, str) and name:
                     names.append(name)
             self._data.available_files = names
+            # Count the echo window from when the list arrived, not when asked.
+            self._file_list_fetched_at = time.monotonic()
             _LOGGER.debug("Fetched %d G-code files", len(self._data.available_files))
         except Exception as exc:
             _LOGGER.debug("Could not fetch file list: %s", exc)
