@@ -884,6 +884,11 @@ class SnapmakerClient:
                         files.remove(path)
                     files.insert(0, path)
             else:
+                if item_in_gcodes and not source_in_gcodes:
+                    # A folder arrived from another root; the notice doesn't
+                    # list its files, so fetch the list (rate-limited).
+                    self._schedule_file_list_refresh()
+                    return False
                 old_prefix = src.rstrip("/") + "/"
                 new_prefix = path.rstrip("/") + "/"
                 moved = []
