@@ -75,13 +75,17 @@ class PopStatusClient:
     ) -> bool:
         """Return True if a PopStatus answers at ``host``."""
         url = cls(host, session).ws_url
-        try:
-            async with session.ws_connect(
-                url, timeout=aiohttp.ClientWSTimeout(ws_close=timeout)
-            ) as ws:
+
+        async def probe() -> bool:
+            async with session.ws_connect(url) as ws:
                 # The device sends its settings straight after connecting.
-                msg = await ws.receive(timeout=timeout)
+                msg = await ws.receive()
                 return msg.type == aiohttp.WSMsgType.TEXT
+
+        try:
+            # asyncio.wait_for rather than aiohttp's ClientWSTimeout, which
+            # older aiohttp versions (< 3.11) don't have.
+            return await asyncio.wait_for(probe(), timeout)
         except Exception:  # noqa: BLE001
             return False
 
