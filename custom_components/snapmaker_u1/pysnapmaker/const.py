@@ -67,6 +67,11 @@ PRINTER_OBJECTS = [
     "led cavity_led",
 ]
 
+# Official Top Cover air purifier (stock firmware 1.3.0+)
+PURIFIER_OBJECT = "purifier"
+# Snapmaker recommends a new filter every 720 hours of circulation.
+TOP_COVER_FILTER_LIFE_HOURS = 720
+
 # Print states (Moonraker/Klipper)
 STATE_STANDBY = "standby"
 STATE_PRINTING = "printing"

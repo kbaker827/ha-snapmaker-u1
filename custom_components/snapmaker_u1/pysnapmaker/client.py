@@ -30,6 +30,7 @@ from .const import (
     KLIPPER_READY,
     KLIPPER_SHUTDOWN,
     PRINTER_OBJECTS,
+    PURIFIER_OBJECT,
     WS_ENDPOINT,
     WS_METHOD_SUBSCRIBE,
     WS_NOTIFY_FILELIST_CHANGED,
@@ -51,6 +52,7 @@ from .models import (
     PrintStats,
     SnapmakerPrinterData,
     Toolhead,
+    TopCoverData,
     VirtualSdCard,
 )
 
@@ -136,6 +138,9 @@ class SnapmakerClient:
         self._chamber_heater_keys: list[str] = []
         self._chamber_filter_keys: list[str] = []
         self._has_filament_config = False
+        self._has_purifier = False
+        # Whether the Top Cover was plugged in at setup (None until known).
+        self._top_cover_at_setup: bool | None = None
         # Klipper objects that decide which entities exist, as seen at setup.
         self._entity_objects: frozenset[str] = frozenset()
         self._objects_changed_callbacks: list[Callable] = []
@@ -242,6 +247,11 @@ class SnapmakerClient:
         """Discovered chamber filter ``output_pin`` objects."""
         return list(self._chamber_filter_keys)
 
+    @property
+    def has_top_cover(self) -> bool:
+        """True when the official Top Cover is plugged in (seen at setup)."""
+        return bool(self._top_cover_at_setup)
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -263,6 +273,9 @@ class SnapmakerClient:
             await self._discover_webcams()
             await self._fetch_printer_state()
             await self.fetch_file_list()
+            self._top_cover_at_setup = bool(
+                self._data.top_cover and self._data.top_cover.detected
+            )
             self._connected = True
             return True
         except Exception as exc:
@@ -315,6 +328,9 @@ class SnapmakerClient:
                 o for o in objects if _RE_CHAMBER_FILTER.match(o)
             ]
             self._has_filament_config = FILAMENT_CONFIG_OBJECT in objects
+            self._has_purifier = PURIFIER_OBJECT in objects
+            if self._has_purifier and self._data.top_cover is None:
+                self._data.top_cover = TopCoverData()
             self._entity_objects = self._entity_objects_from(objects)
             _LOGGER.debug(
                 "Discovered filament sensors: %s; extra temp sensors: %s; "
@@ -340,6 +356,7 @@ class SnapmakerClient:
             or _RE_CHAMBER_HEATER.match(o)
             or _RE_CHAMBER_FILTER.match(o)
             or o == FILAMENT_CONFIG_OBJECT
+            or o == PURIFIER_OBJECT
         )
 
     def register_disconnect_callback(self, callback: Callable) -> None:
@@ -389,6 +406,9 @@ class SnapmakerClient:
             sorted(self._entity_objects - current),
         )
         self._entity_objects = current
+        self._fire_objects_changed()
+
+    def _fire_objects_changed(self) -> None:
         for cb in list(self._objects_changed_callbacks):
             try:
                 cb()
@@ -478,6 +498,7 @@ class SnapmakerClient:
             + self._temp_sensor_keys
             + self._chamber_heater_keys
             + self._chamber_filter_keys
+            + ([PURIFIER_OBJECT] if self._has_purifier else [])
         )
 
     # ------------------------------------------------------------------
@@ -782,8 +803,47 @@ class SnapmakerClient:
                 self._data.chamber_filters[key] = (status[key]["value"] or 0) > 0
                 changed = True
 
+        if PURIFIER_OBJECT in status and self._data.top_cover is not None:
+            self._update_top_cover(status[PURIFIER_OBJECT])
+            changed = True
+
         if changed:
             await self._notify_callbacks()
+
+    def _update_top_cover(self, ps: dict[str, Any]) -> None:
+        """Merge a (possibly partial) purifier status update."""
+        cover = self._data.top_cover
+        if "power_detected" in ps:
+            cover.detected = bool(ps["power_detected"])
+            if (
+                self._top_cover_at_setup is not None
+                and cover.detected != self._top_cover_at_setup
+            ):
+                # Cover plugged in or removed: reload to add/remove its entities.
+                _LOGGER.info(
+                    "Snapmaker U1 Top Cover %s; reloading",
+                    "connected" if cover.detected else "disconnected",
+                )
+                self._top_cover_at_setup = cover.detected
+                self._fire_objects_changed()
+        if "mode" in ps:
+            cover.mode = int(ps["mode"] or 0)
+        if "desired_chamber_temp" in ps:
+            cover.desired_temp = ps["desired_chamber_temp"] or 0.0
+        if "inner_fan_work_time" in ps:
+            cover.filter_seconds = ps["inner_fan_work_time"] or 0.0
+        if "inner_fan_rpm" in ps:
+            cover.circulation_rpm = ps["inner_fan_rpm"]
+        for field_name, speed_attr, delay_attr in (
+            ("exhaust_fan", "exhaust_speed", "exhaust_delay"),
+            ("inner_fan", "circulation_speed", "circulation_delay"),
+        ):
+            fan = ps.get(field_name)
+            if isinstance(fan, dict):
+                if "speed" in fan:
+                    setattr(cover, speed_attr, fan["speed"] or 0.0)
+                if "delay" in fan:
+                    setattr(cover, delay_attr, int(fan["delay"] or 0))
 
     def _update_filament_slots(self, config: dict[str, Any]) -> None:
         """Merge a (possibly partial) print_task_config update into the slots."""
@@ -1098,6 +1158,49 @@ class SnapmakerClient:
         """Turn a chamber filter output_pin on or off (e.g. DragonBreath filter)."""
         name = pin_key.split(" ", 1)[-1]
         await self.execute_gcode(f"SET_PIN PIN={name} VALUE={1 if on else 0}")
+
+    async def set_top_cover_mode(self, mode: int) -> None:
+        """Switch the Top Cover purifier mode (same settings as Snapmaker's slicer)."""
+        commands = {
+            0: "SET_PURIFIER_MODE MODE=0",
+            # Cooling: exhaust fan, speeds up above 42 °C (PLA/PETG/TPU)
+            1: "SET_PURIFIER_MODE MODE=1 DESIRE_TEMP=42 ALARM_TEMP=48 FAN_SPEED=0.6",
+            # Preheat / keep warm: circulate through the filter, no exhaust
+            2: "SET_PURIFIER_MODE MODE=2 FAN_SPEED=0.6",
+            3: "SET_PURIFIER_MODE MODE=3 DESIRE_TEMP=45 FAN_SPEED=0.6",
+        }
+        if mode not in commands:
+            raise ValueError(f"Unknown Top Cover mode {mode}")
+        await self.execute_gcode(commands[mode])
+
+    async def set_top_cover_fan(self, fan: str, percent: float) -> None:
+        """Set the Top Cover exhaust or circulation fan (0–100 %).
+
+        ``fan`` is "exhaust" or "inner". The firmware normally keeps a fan
+        running for its delay-off time after it is set to 0; switching it off
+        from Home Assistant should be immediate, so the delay is cleared for
+        that command and restored afterwards.
+        """
+        if fan not in ("exhaust", "inner"):
+            raise ValueError(f"Unknown Top Cover fan {fan}")
+        percent = max(0.0, min(100.0, percent))
+        if percent > 0:
+            await self.execute_gcode(
+                f"SET_PURIFIER FAN={fan} SPEED={percent / 100:.2f}"
+            )
+            return
+        cover = self._data.top_cover
+        delay = 0
+        if cover is not None:
+            delay = cover.exhaust_delay if fan == "exhaust" else cover.circulation_delay
+        script = f"SET_PURIFIER FAN={fan} SPEED=0 DELAY_OFF=0"
+        if delay:
+            script += f"\nSET_PURIFIER FAN={fan} DELAY_OFF={delay}"
+        await self.execute_gcode(script)
+
+    async def reset_top_cover_filter(self) -> None:
+        """Reset the filter usage counter after fitting a new filter."""
+        await self.execute_gcode("SET_PURIFIER FAN=inner WORK=0")
 
     async def set_active_tool(self, tool_index: int) -> None:
         """Switch the active extruder tool (T0–T3)."""

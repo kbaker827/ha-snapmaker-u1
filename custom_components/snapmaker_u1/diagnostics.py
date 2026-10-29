@@ -5,6 +5,7 @@ Sensitive values (API key) are automatically redacted.
 """
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
@@ -87,4 +88,7 @@ async def async_get_config_entry_diagnostics(
         "fan": {
             "speed_pct": data.fan.speed if data else 0,
         },
+        "top_cover": (
+            dataclasses.asdict(data.top_cover) if data and data.top_cover else None
+        ),
     }

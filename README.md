@@ -5,7 +5,8 @@
 > A Home Assistant custom integration for the **Snapmaker U1** 3D printer,
 > inspired by [ha-bambulab](https://github.com/greghesp/ha-bambulab).
 > Live status, temperatures, loaded filament colours, camera, print controls,
-> BIQU Panda Breath support and a built-in dashboard card. No cloud needed.
+> official Top Cover and BIQU Panda Breath support, and a built-in dashboard
+> card. No cloud needed.
 
 ![Snapmaker U1 dashboard card: printing (light and dark), paused and idle](docs/images/card-overview.png)
 
@@ -19,6 +20,7 @@ shows your printer's real camera and values.</sub>
 - [Dashboard card](#dashboard-card)
 - [Filament type and colour](#filament-type-and-colour)
 - [Panda Breath / DragonBreath chamber heater](#panda-breath--dragonbreath-chamber-heater)
+- [Official Top Cover](#official-top-cover)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Authentication](#authentication)
@@ -62,6 +64,7 @@ No Snapmaker account or cloud connection is required. The integration does
 | T0–T3 Filament | Loaded filament, e.g. `PLA Basic`, or `Empty`. Colour, vendor and more as attributes ([details](#filament-type-and-colour)) |
 | Chamber / extra temperature sensors | Every Klipper `temperature_sensor` (e.g. chamber, MCU) |
 | Panda Breath Temperature | Chamber heater temperature, if present ([details](#panda-breath--dragonbreath-chamber-heater)) |
+| Top Cover Filter Used / Filter Life | Filter hours used and % life left, if the official Top Cover is fitted ([details](#official-top-cover)) |
 | Part Cooling Fan | Fan speed in % |
 | Print Speed / Flow Rate | Current speed and flow overrides in % |
 | Klipper State | `ready` / `startup` / `shutdown` / `error` |
@@ -84,6 +87,7 @@ No Snapmaker account or cloud connection is required. The integration does
 | Home All Axes | `G28` |
 | Home X / Y / Z | Home a single axis |
 | Restart Klipper | Restarts the Klipper process |
+| Reset Top Cover Filter | Resets the filter counter after fitting a new filter (Top Cover only) |
 
 ### Controls (numbers, selects, switches)
 | Entity | Description |
@@ -97,6 +101,7 @@ No Snapmaker account or cloud connection is required. The integration does
 | Active Tool | Switch between T0–T3 |
 | Work Light | The cavity light (reads its real state from the printer) |
 | DragonBreath Filter | Chamber filter fan, if present |
+| Top Cover Mode / Exhaust Fan / Circulation Fan | Official Top Cover purifier mode and fans, if fitted ([details](#official-top-cover)) |
 
 ### Starting a print
 The **Print File** select lists the G-code files on the printer, newest
@@ -181,6 +186,8 @@ What it shows:
   Tap a tile to set its target.
 - 🔥 **Chamber heater presets**: one-tap filament buttons (PLA, ABS, PC, …) for a
   Panda Breath / DragonBreath ([details](#filament-presets)).
+- 🌬️ **Top Cover**: one-tap Off / Cooling / Keep warm buttons and the filter
+  life, if the official Top Cover is fitted ([details](#official-top-cover)).
 - 🎨 **Loaded filament** on each nozzle tile: a colour dot and the material
   (e.g. `PLA Basic`). A dashed ring means the nozzle is empty.
 - **Speed, flow and fan** at a glance. Tap to adjust.
@@ -199,6 +206,7 @@ Options (all optional; all except `chamber_presets` are also in the visual edito
 | `camera_mode` | `live` | `live` video or `snapshot` (refreshed every 5 seconds) |
 | `show_controls` | `true` | Show the control buttons |
 | `show_chamber_presets` | `true` | Show filament preset buttons for a Panda Breath / DragonBreath |
+| `show_top_cover` | `true` | Show the Top Cover mode buttons and filter life |
 | `chamber_presets` | see below | Your own preset list (YAML only), e.g. `[{name: ABS, temp: 55}, {name: PLA, temp: 0}]` |
 
 Example:
@@ -305,6 +313,53 @@ chamber_presets:
 
 ---
 
+## Official Top Cover
+
+The Snapmaker U1 **Top Cover** (with its air purifier) works with **stock**
+firmware 1.3.0 or later, and with the Extended Firmware. Once the cover is
+plugged in, the integration adds:
+
+| Entity | What it does |
+|---|---|
+| `select.<printer>_top_cover_mode` | **Off**, **Cooling** (exhaust fan; speeds up above 42 °C, for PLA / PETG / TPU), **Keep warm** (filtered circulation with no exhaust, for ABS / ASA / PC) or **Preheat**. Same settings as Snapmaker's slicer |
+| `number.<printer>_top_cover_exhaust_fan` | Exhaust fan speed, 0–100 % |
+| `number.<printer>_top_cover_circulation_fan` | Circulation (filter) fan speed, 0–100 %. `0` switches it off straight away |
+| `sensor.<printer>_top_cover_filter_used` | Hours the filter has been used |
+| `sensor.<printer>_top_cover_filter_life` | Filter life left in %, based on Snapmaker's 720-hour recommendation |
+| `sensor.<printer>_top_cover_circulation_fan_rpm` | Circulation fan speed (RPM) |
+| `button.<printer>_reset_top_cover_filter` | Press after fitting a new filter |
+
+![Top Cover controls on the dashboard card](docs/images/card-top-cover.png)
+
+On the dashboard card it appears as a **Top Cover** row with Off / Cooling /
+Keep warm buttons and the filter life (red below 10 %). Tap the filter life
+for its history.
+
+Notes:
+- Plugging the cover in or removing it is detected automatically: the
+  integration reloads and adds or removes these entities.
+- A print's own start G-code can still change the mode. Snapmaker's slicer sets it
+  from the filament type, so the setting in Home Assistant is a manual
+  override, not a permanent one.
+- The printer turns the purifier off by itself a few minutes after a print ends.
+
+Example automation, a reminder when the filter is nearly used up:
+
+```yaml
+automation:
+  - alias: "U1 Top Cover filter reminder"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.snapmaker_u1_top_cover_filter_life
+        below: 10
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          message: "Time to replace the Snapmaker U1 Top Cover filter."
+```
+
+---
+
 ## Installation
 
 ### HACS (recommended)
@@ -396,6 +451,7 @@ automation:
 | Dashboard card not in the card picker / "Custom element doesn't exist" | Update to 1.10.0 or later, **restart Home Assistant**, then hard-refresh the browser (Ctrl+Shift+R); in the mobile app, use **Reset frontend cache** in the Companion app settings. The integration adds `/snapmaker_u1_static/snapmaker-u1-card.js` to Settings → Dashboards → ⋮ → **Resources** for you (and updates an entry you added by hand). Add the card to a dashboard you created (Settings → Dashboards); newer Home Assistant versions generate the default *Overview* automatically. YAML-mode dashboards: add that URL under `lovelace: resources:` as a `module` |
 | Card shows no nozzle tiles | Update to 1.7.2 or later |
 | Print File shows "Unavailable" | Update to 1.7.1 or later (older versions misread the printer's file list). It's also unavailable while the printer isn't ready or has no files in its storage |
+| Top Cover entities missing | Plug the cover in and update the printer to firmware 1.3.0 or later. The entities appear by themselves once the printer detects the cover |
 | Panda Breath entities missing | Enable it in the printer's Firmware Config page first (Extended Firmware only), then reload the integration |
 | Temperatures show 0 after startup | Klipper may still be initialising; values update within seconds once it's ready |
 

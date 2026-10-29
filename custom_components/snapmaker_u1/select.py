@@ -3,6 +3,7 @@
 Provides:
   - PrintFileSelect  – choose a G-code file to print (starts print on select)
   - ActiveToolSelect – switch the active extruder (only on multi-extruder printers)
+  - TopCoverModeSelect – official Top Cover purifier mode (cooling / keep warm)
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import SnapmakerDataUpdateCoordinator
+from .definitions import TOP_COVER_MODES
 from .sensor import SnapmakerBaseEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,6 +37,9 @@ async def async_setup_entry(
     extruder_count = coordinator.data.extruder_count if coordinator.data else 0
     if extruder_count > 1:
         entities.append(ActiveToolSelect(coordinator, extruder_count))
+
+    if coordinator.client and coordinator.client.has_top_cover:
+        entities.append(TopCoverModeSelect(coordinator))
 
     async_add_entities(entities)
 
@@ -152,3 +157,43 @@ class ActiveToolSelect(SnapmakerBaseEntity, SelectEntity):
             self.async_write_ha_state()
         except Exception as exc:
             _LOGGER.error("Error switching to tool %s: %s", option, exc)
+
+
+class TopCoverModeSelect(SnapmakerBaseEntity, SelectEntity):
+    """Purifier mode of the official Top Cover."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "top_cover_mode"
+    _attr_icon = "mdi:air-purifier"
+    _attr_options = list(TOP_COVER_MODES.values())
+
+    def __init__(self, coordinator: SnapmakerDataUpdateCoordinator) -> None:
+        super().__init__(coordinator)
+        host = coordinator.entry.data["host"]
+        self._attr_unique_id = f"{host}_top_cover_mode_select"
+
+    @property
+    def current_option(self) -> str | None:
+        cover = self.coordinator.data.top_cover if self.coordinator.data else None
+        return TOP_COVER_MODES.get(cover.mode) if cover else None
+
+    @property
+    def available(self) -> bool:
+        data = self.coordinator.data
+        return bool(
+            super().available
+            and data
+            and data.is_ready
+            and data.top_cover
+            and data.top_cover.detected
+        )
+
+    async def async_select_option(self, option: str) -> None:
+        mode = next((m for m, name in TOP_COVER_MODES.items() if name == option), None)
+        client = self.coordinator.client
+        if mode is None or client is None:
+            raise ServiceValidationError(f"Cannot set Top Cover mode {option}")
+        try:
+            await client.set_top_cover_mode(mode)
+        except Exception as exc:
+            raise HomeAssistantError(f"Could not set Top Cover mode: {exc}") from exc

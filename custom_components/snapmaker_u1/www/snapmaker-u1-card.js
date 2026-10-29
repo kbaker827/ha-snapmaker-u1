@@ -7,7 +7,7 @@
  * temperatures and print controls for one printer.
  */
 
-const CARD_VERSION = "1.10.1";
+const CARD_VERSION = "1.11.0";
 const DOMAIN = "snapmaker_u1";
 
 const ACCENTS = {
@@ -139,7 +139,7 @@ class SnapmakerU1Card extends HTMLElement {
       camera_mode: "live",
       show_controls: true,
       show_chamber_presets: true,
-      show_chamber_presets: true,
+      show_top_cover: true,
       accent_color: "theme",
     };
   }
@@ -174,7 +174,35 @@ class SnapmakerU1Card extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._printers && !this._loading) this._loadPrinters();
+    else if (this._registryChanged()) this._scheduleReload();
     this._safeUpdate();
+  }
+
+  // The entity registry changes when the integration reloads, e.g. after a
+  // Top Cover is plugged in. Re-read the entity mapping so new entities show
+  // up without reloading the browser.
+  _registryKey() {
+    const hass = this._hass;
+    return hass.entities || Object.keys(hass.states).length;
+  }
+
+  _registryChanged() {
+    return this._loadedKey !== undefined && this._registryKey() !== this._loadedKey;
+  }
+
+  _scheduleReload() {
+    // Restart the wait only when the registry changed again, not on every
+    // state update (those arrive constantly while printing).
+    const key = this._registryKey();
+    if (this._reloadTimer && key === this._scheduledKey) return;
+    this._scheduledKey = key;
+    clearTimeout(this._reloadTimer);
+    // Wait for a reload's remove/add burst to settle first.
+    this._reloadTimer = setTimeout(() => {
+      this._reloadTimer = null;
+      if (this._loading) this._scheduleReload();
+      else if (this._registryChanged()) this._loadPrinters();
+    }, 1500);
   }
 
   // Home Assistant replaces a card that throws while updating with a blank
@@ -212,6 +240,8 @@ class SnapmakerU1Card extends HTMLElement {
     // Close the MJPEG stream so hidden cards don't keep the camera busy.
     this._connected = false;
     this._setCamera("");
+    clearTimeout(this._reloadTimer);
+    this._reloadTimer = null;
   }
 
   getCardSize() {
@@ -228,6 +258,7 @@ class SnapmakerU1Card extends HTMLElement {
 
   async _loadPrinters() {
     this._loading = true;
+    this._loadedKey = this._registryKey();
     try {
       const result = await this._hass.callWS({ type: `${DOMAIN}/entities` });
       this._printers = result.printers || [];
@@ -238,6 +269,7 @@ class SnapmakerU1Card extends HTMLElement {
     this._loading = false;
     this._signature = "";
     this._safeUpdate();
+    if (this._registryChanged()) this._scheduleReload();  // changed while loading
   }
 
   get _printer() {
@@ -413,6 +445,7 @@ class SnapmakerU1Card extends HTMLElement {
       ${active ? this._renderProgress(status) : this._renderIdle(status)}
       ${this._renderTemps()}
       ${this._config.show_chamber_presets !== false ? this._renderChamberPresets() : ""}
+      ${this._config.show_top_cover !== false ? this._renderTopCover() : ""}
       ${this._renderStats()}
       ${this._config.show_controls !== false ? this._renderControls(status, light) : ""}`;
   }
@@ -670,6 +703,42 @@ class SnapmakerU1Card extends HTMLElement {
     return rows.join("");
   }
 
+  // Official Top Cover: purifier mode buttons plus filter life.
+  _renderTopCover() {
+    const selectId = this._eid("select.top_cover_mode_select");
+    const select = selectId && this._hass.states[selectId];
+    // "restored" = left in the registry after the cover was unplugged
+    if (!select || select.attributes.restored) return "";
+    const disabled = select.state === "unavailable";
+    const life = num(this._state("sensor.top_cover_filter_life"));
+    const modes = [
+      ["off", "Off", "mdi:power"],
+      ["cooling", "Cooling", "mdi:snowflake"],
+      ["keep_warm", "Keep warm", "mdi:fire"],
+    ];
+    if (select.state === "preheat") modes.splice(2, 0, ["preheat", "Preheat", "mdi:heat-wave"]);
+    const chips = modes.map(([value, label, icon]) => {
+      const active = select.state === value;
+      return `
+        <button class="preset ${active ? (value === "off" ? "active-off" : "active") : ""}" data-action="cover-mode"
+          data-entity="${esc(selectId)}" data-option="${value}" ${disabled ? "disabled" : ""} title="Top Cover: ${label}">
+          <ha-icon icon="${icon}"></ha-icon>
+          <span class="preset-temp">${label}</span>
+        </button>`;
+    });
+    const filter =
+      life != null
+        ? `<button class="cover-filter ${life <= 10 ? "low" : ""}" data-action="more-info"
+            data-entity="${esc(this._eid("sensor.top_cover_filter_life"))}">
+            <ha-icon icon="mdi:air-filter"></ha-icon>Filter ${Math.round(life)}%</button>`
+        : "";
+    return `
+      <div class="presets cover">
+        <div class="presets-title"><ha-icon icon="mdi:air-purifier"></ha-icon>Top Cover${filter}</div>
+        <div class="preset-row">${chips.join("")}</div>
+      </div>`;
+  }
+
   _renderStats() {
     const stats = [
       ["sensor.speed_factor", "number.speed_factor", "mdi:speedometer", "Speed"],
@@ -793,6 +862,12 @@ class SnapmakerU1Card extends HTMLElement {
           this._hass.callService("switch", "toggle", { entity_id: this._eid(action.slice(7)) });
         }
         break;
+      case "cover-mode":
+        this._hass.callService("select", "select_option", {
+          entity_id: target.dataset.entity,
+          option: target.dataset.option,
+        });
+        break;
       case "preset":
         this._hass.callService("number", "set_value", {
           entity_id: target.dataset.entity,
@@ -839,6 +914,7 @@ class SnapmakerU1CardEditor extends HTMLElement {
           camera_mode: "Camera mode",
           show_controls: "Show controls",
           show_chamber_presets: "Show chamber heater presets",
+          show_top_cover: "Show Top Cover controls",
         })[schema.name] || schema.name;
       this._form.addEventListener("value-changed", (ev) => {
         this._config = ev.detail.value;
@@ -880,6 +956,7 @@ class SnapmakerU1CardEditor extends HTMLElement {
       },
       { name: "show_controls", selector: { boolean: {} } },
       { name: "show_chamber_presets", selector: { boolean: {} } },
+      { name: "show_top_cover", selector: { boolean: {} } },
     ];
     this._form.data = { ...SnapmakerU1Card.getStubConfig(), ...this._config };
   }
@@ -977,6 +1054,17 @@ const STYLES = `
   }
   .preset:disabled { opacity: .4; cursor: default; }
   .preset-name { font-size: 12px; font-weight: 600; }
+  .cover .preset-row { grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); }
+  .cover .preset { --mdc-icon-size: 18px; }
+  .cover .preset.active { border-color: var(--primary-color); background: color-mix(in srgb, var(--primary-color) 14%, transparent); }
+  .cover .preset.active .preset-temp, .cover .preset.active ha-icon { color: var(--primary-color); }
+  .cover .presets-title ha-icon { color: var(--state-fan-active-color, var(--primary-color)); }
+  .cover-filter {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+    border: none; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer;
+  }
+  .cover-filter.low { color: var(--error-color, #db4437); }
+  .cover-filter.low ha-icon { color: var(--error-color, #db4437); }
   .preset-temp { font-size: 11px; color: var(--secondary-text-color); }
   .preset.active { border-color: var(--state-climate-heat-color, #ff8100); background: color-mix(in srgb, var(--state-climate-heat-color, #ff8100) 14%, transparent); }
   .preset.active .preset-temp { color: var(--state-climate-heat-color, #ff8100); font-weight: 600; }
