@@ -9,6 +9,8 @@ CONF_PORT = "port"
 CONF_API_KEY = "api_key"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_TEMPERATURE_UNIT = "temperature_unit"
+# Optional BIQU PopStatus light bar (IP address or hostname)
+CONF_POPSTATUS_HOST = "popstatus_host"
 
 # Unit used for every printer temperature. 3D printing works in °C, so that is
 # the default even when Home Assistant itself is set to °F.

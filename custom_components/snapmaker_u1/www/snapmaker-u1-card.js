@@ -7,7 +7,7 @@
  * temperatures and print controls for one printer.
  */
 
-const CARD_VERSION = "1.11.0";
+const CARD_VERSION = "1.12.0";
 const DOMAIN = "snapmaker_u1";
 
 const ACCENTS = {
@@ -786,6 +786,13 @@ class SnapmakerU1Card extends HTMLElement {
         this._control(`toggle:${role}`, on ? "mdi:air-filter" : "mdi:air-purifier-off", "Filter", on ? "on" : "", false, offline)
       );
     }
+    const bar = this._state("light.popstatus_light");
+    if (bar && !bar.attributes.restored) {
+      const on = bar.state === "on";
+      buttons.push(
+        this._control("toggle:light.popstatus_light", on ? "mdi:led-strip-variant" : "mdi:led-strip-variant-off", "Status bar", on ? "on" : "", false, bar.state === "unavailable")
+      );
+    }
     if (!active && this._eid("button.home_all")) {
       buttons.push(this._control("home", "mdi:home-import-outline", "Home", "", false, offline));
     }
@@ -859,7 +866,8 @@ class SnapmakerU1Card extends HTMLElement {
         break;
       default:
         if (action.startsWith("toggle:")) {
-          this._hass.callService("switch", "toggle", { entity_id: this._eid(action.slice(7)) });
+          const role = action.slice(7);
+          this._hass.callService(role.split(".")[0], "toggle", { entity_id: this._eid(role) });
         }
         break;
       case "cover-mode":

@@ -8,6 +8,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
@@ -17,6 +18,7 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_API_KEY,
     CONF_HOST,
+    CONF_POPSTATUS_HOST,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
     CONF_TEMPERATURE_UNIT,
@@ -29,6 +31,7 @@ from .const import (
     TEMP_UNIT_SYSTEM,
 )
 from .pysnapmaker.client import SnapmakerClient
+from .pysnapmaker.popstatus import PopStatusClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -149,8 +152,16 @@ class SnapmakerOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage the options."""
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            popstatus = (user_input.get(CONF_POPSTATUS_HOST) or "").strip()
+            user_input[CONF_POPSTATUS_HOST] = popstatus
+            if popstatus and not await PopStatusClient.test_connection(
+                popstatus, async_get_clientsession(self.hass)
+            ):
+                errors[CONF_POPSTATUS_HOST] = "popstatus_cannot_connect"
+            else:
+                return self.async_create_entry(title="", data=user_input)
 
         current_interval = self._entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
@@ -177,6 +188,14 @@ class SnapmakerOptionsFlow(config_entries.OptionsFlow):
                         mode=SelectSelectorMode.DROPDOWN,
                     )
                 ),
+                vol.Optional(
+                    CONF_POPSTATUS_HOST,
+                    description={
+                        "suggested_value": (user_input or self._entry.options).get(
+                            CONF_POPSTATUS_HOST, ""
+                        )
+                    },
+                ): str,
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)

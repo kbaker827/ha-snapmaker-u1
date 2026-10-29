@@ -37,13 +37,18 @@
         "title": "Snapmaker U1 Options",
         "data": {
           "scan_interval": "Fallback poll interval (seconds)",
-          "temperature_unit": "Temperature unit"
+          "temperature_unit": "Temperature unit",
+          "popstatus_host": "BIQU PopStatus address (optional)"
         },
         "data_description": {
           "scan_interval": "How often to poll the printer via HTTP when the WebSocket is disconnected (10–300 seconds).",
-          "temperature_unit": "Unit for all printer temperatures. 3D printing normally uses °C, even if the rest of Home Assistant uses °F."
+          "temperature_unit": "Unit for all printer temperatures. 3D printing normally uses °C, even if the rest of Home Assistant uses °F.",
+          "popstatus_host": "IP address or hostname of a BIQU PopStatus light bar, e.g. 192.168.1.60 or PopStatus.local. Leave empty if you don't have one."
         }
       }
+    },
+    "error": {
+      "popstatus_cannot_connect": "Can't reach a PopStatus at that address. Check it's powered on and on the same network (open its address in a browser to test)."
     }
   },
   "selector": {
@@ -103,7 +108,8 @@
       "printer_ready": { "name": "Printer Ready" },
       "is_printing": { "name": "Printing" },
       "is_paused": { "name": "Paused" },
-      "has_error": { "name": "Error" }
+      "has_error": { "name": "Error" },
+      "popstatus_printer_link": { "name": "Printer connection" }
     },
     "button": {
       "pause_print": { "name": "Pause Print" },
@@ -140,10 +146,20 @@
           "preheat": "Preheat",
           "keep_warm": "Keep warm"
         }
+      },
+      "popstatus_light_mode": {
+        "name": "Light mode",
+        "state": {
+          "simple": "Simple",
+          "advanced": "Advanced"
+        }
       }
     },
     "switch": {
       "work_light": { "name": "Work Light" }
+    },
+    "light": {
+      "popstatus_light": { "name": "Light" }
     }
   },
   "device_automation": {

@@ -91,4 +91,9 @@ async def async_get_config_entry_diagnostics(
         "top_cover": (
             dataclasses.asdict(data.top_cover) if data and data.top_cover else None
         ),
+        "popstatus": (
+            {"host": coordinator.popstatus.host, **dataclasses.asdict(coordinator.popstatus.data)}
+            if coordinator.popstatus
+            else None
+        ),
     }

@@ -18,6 +18,7 @@ from .definitions import (
     PRINTER_BINARY_SENSORS,
     SnapmakerBinarySensorEntityDescription,
 )
+from .popstatus_entity import PopStatusEntity
 from .sensor import SnapmakerBaseEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,6 +56,9 @@ async def async_setup_entry(
                 extra_attributes_fn=_make_filament_attrs_fn(key),
             )
             entities.append(SnapmakerFilamentBinarySensor(coordinator, desc, key))
+
+    if coordinator.popstatus is not None:
+        entities.append(PopStatusPrinterLink(coordinator))
 
     async_add_entities(entities)
 
@@ -147,3 +151,18 @@ class SnapmakerFilamentBinarySensor(SnapmakerBinarySensor):
         host = coordinator.entry.data["host"]
         self._attr_unique_id = f"{host}_filament_{sensor_key}"
         self._attr_has_entity_name = False  # Use full name set in description
+
+
+class PopStatusPrinterLink(PopStatusEntity, BinarySensorEntity):
+    """On while the PopStatus is connected to (reading status from) the printer."""
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+
+    def __init__(self, coordinator: SnapmakerDataUpdateCoordinator) -> None:
+        super().__init__(coordinator, "printer_link")
+
+    @property
+    def is_on(self) -> bool | None:
+        if self.popstatus.data.printer_state is None:
+            return None
+        return self.popstatus.data.printer_linked

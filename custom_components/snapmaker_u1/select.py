@@ -4,6 +4,7 @@ Provides:
   - PrintFileSelect  – choose a G-code file to print (starts print on select)
   - ActiveToolSelect – switch the active extruder (only on multi-extruder printers)
   - TopCoverModeSelect – official Top Cover purifier mode (cooling / keep warm)
+  - PopStatusLightModeSelect – BIQU PopStatus Simple / Advanced light mode
 """
 from __future__ import annotations
 
@@ -18,6 +19,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN
 from .coordinator import SnapmakerDataUpdateCoordinator
 from .definitions import TOP_COVER_MODES
+from .popstatus_entity import PopStatusEntity
+from .pysnapmaker.popstatus import POPSTATUS_LIGHT_MODES
 from .sensor import SnapmakerBaseEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,6 +43,9 @@ async def async_setup_entry(
 
     if coordinator.client and coordinator.client.has_top_cover:
         entities.append(TopCoverModeSelect(coordinator))
+
+    if coordinator.popstatus is not None:
+        entities.append(PopStatusLightModeSelect(coordinator))
 
     async_add_entities(entities)
 
@@ -197,3 +203,26 @@ class TopCoverModeSelect(SnapmakerBaseEntity, SelectEntity):
             await client.set_top_cover_mode(mode)
         except Exception as exc:
             raise HomeAssistantError(f"Could not set Top Cover mode: {exc}") from exc
+
+
+class PopStatusLightModeSelect(PopStatusEntity, SelectEntity):
+    """PopStatus light mode: Simple (one style) or Advanced (per printer state)."""
+
+    _attr_icon = "mdi:led-strip-variant"
+    _attr_options = list(POPSTATUS_LIGHT_MODES.values())
+
+    def __init__(self, coordinator: SnapmakerDataUpdateCoordinator) -> None:
+        super().__init__(coordinator, "light_mode")
+
+    @property
+    def current_option(self) -> str | None:
+        return POPSTATUS_LIGHT_MODES.get(self.popstatus.data.light_mode)
+
+    async def async_select_option(self, option: str) -> None:
+        mode = next((m for m, name in POPSTATUS_LIGHT_MODES.items() if name == option), None)
+        if mode is None:
+            raise ServiceValidationError(f"Unknown PopStatus light mode {option}")
+        try:
+            await self.popstatus.set_light_mode(mode)
+        except ConnectionError as exc:
+            raise HomeAssistantError(str(exc)) from exc
