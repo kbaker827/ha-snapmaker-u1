@@ -854,23 +854,49 @@ class SnapmakerClient:
     async def _apply_file_list_change(self, params: Any) -> bool:
         """Update the cached file list from a notify_filelist_changed payload.
 
-        Returns True when the list changed. Never re-fetches the whole list for
-        single-file events, and only schedules a rate-limited refresh for bulk
-        events (root_update, move_dir, unknown actions).
+        Returns True when the list changed. File and directory events are
+        applied from the payload; only root_update (or an unknown action)
+        schedules a rate-limited full refresh.
         """
         info = params[0] if isinstance(params, list) and params and isinstance(params[0], dict) else {}
         action = info.get("action", "")
         item = info.get("item") if isinstance(info.get("item"), dict) else {}
         source = info.get("source_item") if isinstance(info.get("source_item"), dict) else {}
-        if item.get("root", "gcodes") != "gcodes" and source.get("root", "gcodes") != "gcodes":
-            return False  # config files, logs, timelapses, ...
+        item_in_gcodes = item.get("root", "gcodes") == "gcodes"
+        source_in_gcodes = bool(source) and source.get("root", "gcodes") == "gcodes"
         path = item.get("path") if isinstance(item.get("path"), str) else ""
+        src = source.get("path") if isinstance(source.get("path"), str) else ""
 
         def is_gcode(name: str) -> bool:
             return bool(name) and name.lower().endswith(GCODE_EXTENSIONS)
 
         files = list(self._data.available_files)
-        if action in ("create_file", "modify_file"):
+        if action in ("move_file", "move_dir"):
+            # Moves can cross roots: drop the source if it was in gcodes, add
+            # the destination if it lands in gcodes.
+            if not item_in_gcodes and not source_in_gcodes:
+                return False
+            if action == "move_file":
+                if source_in_gcodes and src in files:
+                    files.remove(src)
+                if item_in_gcodes and is_gcode(path):
+                    if path in files:
+                        files.remove(path)
+                    files.insert(0, path)
+            else:
+                old_prefix = src.rstrip("/") + "/"
+                new_prefix = path.rstrip("/") + "/"
+                moved = []
+                for f in files:
+                    if source_in_gcodes and f.startswith(old_prefix):
+                        if item_in_gcodes:
+                            moved.append(new_prefix + f[len(old_prefix):])
+                        continue  # moved out of gcodes, or renamed below
+                    moved.append(f)
+                files = moved
+        elif not item_in_gcodes:
+            return False  # config files, logs, timelapses, ...
+        elif action in ("create_file", "modify_file"):
             if not is_gcode(path):
                 return False  # thumbnails, metadata, ...
             if path in files:
@@ -880,22 +906,14 @@ class SnapmakerClient:
             if path not in files:
                 return False
             files.remove(path)
-        elif action == "move_file":
-            src = source.get("path") if isinstance(source.get("path"), str) else ""
-            if src in files:
-                files.remove(src)
-            if is_gcode(path) and item.get("root", "gcodes") == "gcodes":
-                if path in files:
-                    files.remove(path)
-                files.insert(0, path)
         elif action == "create_dir":
             return False
         elif action == "delete_dir":
             prefix = path.rstrip("/") + "/"
             files = [f for f in files if not f.startswith(prefix)]
         else:
-            # root_update, move_dir or something new: refresh the full list,
-            # unless this is just the echo of our own request.
+            # root_update or something new: refresh the full list, unless
+            # this is just the echo of our own request.
             if (
                 self._file_list_fetched_at is not None
                 and time.monotonic() - self._file_list_fetched_at < FILE_LIST_ECHO_WINDOW

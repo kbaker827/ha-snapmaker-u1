@@ -26,6 +26,7 @@ CARD_FILENAME = "snapmaker-u1-card.js"
 CARD_URL_BASE = f"/{DOMAIN}_static"
 CARD_URL = f"{CARD_URL_BASE}/{CARD_FILENAME}"
 WS_TYPE_ENTITIES = f"{DOMAIN}/entities"
+DATA_CARD_URL = f"{DOMAIN}_card_url"
 
 
 async def async_register_frontend(hass: HomeAssistant) -> None:
@@ -51,6 +52,7 @@ async def async_register_frontend(hass: HomeAssistant) -> None:
 
     # Version query string so browsers pick up a new card after an update.
     url = f"{CARD_URL}?v={version}"
+    hass.data[DATA_CARD_URL] = url
     if not await _async_ensure_lovelace_resource(hass, url):
         # YAML-mode dashboards: resources can't be edited from here, so load
         # the card as an extra frontend module instead.
@@ -104,6 +106,17 @@ async def _async_ensure_lovelace_resource(hass: HomeAssistant, url: str) -> bool
     except Exception:  # noqa: BLE001 - fall back to the extra-module route
         _LOGGER.exception("Could not register the Snapmaker U1 card resource")
         return False
+
+
+async def async_ensure_card_resource(hass: HomeAssistant) -> None:
+    """Make sure the card resource exists (e.g. a printer was re-added).
+
+    Removing the last printer deletes the resource; adding one again without
+    restarting doesn't re-run async_setup, so entry setup restores it here.
+    """
+    url = hass.data.get(DATA_CARD_URL)
+    if url:
+        await _async_ensure_lovelace_resource(hass, url)
 
 
 async def async_remove_lovelace_resource(hass: HomeAssistant) -> None:

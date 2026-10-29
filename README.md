@@ -411,7 +411,8 @@ automation:
   and registered as a dashboard resource (an extra frontend module in YAML
   mode); it reads entities through the `snapmaker_u1/entities` websocket command
 - **File list**: kept up to date from Moonraker's `notify_filelist_changed`
-  details; a full re-fetch only happens for bulk changes, at most once a minute
+  details (files and folders); a full re-fetch only happens for a
+  `root_update`, at most once a minute
 - **Startup**: if the printer is unreachable, setup is retried automatically
 - **HA version**: Home Assistant 2024.1+
 - **Icon**: shipped in `custom_components/snapmaker_u1/brand/` (light and dark,

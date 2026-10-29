@@ -20,7 +20,11 @@ from .const import (
     TEMP_UNIT_FAHRENHEIT,
 )
 from .coordinator import SnapmakerDataUpdateCoordinator
-from .frontend import async_register_frontend, async_remove_lovelace_resource
+from .frontend import (
+    async_ensure_card_resource,
+    async_register_frontend,
+    async_remove_lovelace_resource,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -155,6 +159,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     _apply_temperature_unit(hass, entry)
+    await async_ensure_card_resource(hass)
 
     # Reload the entry if options change (e.g. scan interval)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
