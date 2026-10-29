@@ -8,13 +8,11 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
     CONF_API_KEY,
     CONF_HOST,
-    CONF_POPSTATUS_HOST,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
     DEFAULT_PORT,
@@ -23,7 +21,6 @@ from .const import (
 )
 from .pysnapmaker.client import SnapmakerClient
 from .pysnapmaker.const import PRINT_STATE_EVENTS
-from .pysnapmaker.popstatus import PopStatusClient
 from .pysnapmaker.models import SnapmakerPrinterData
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,7 +44,6 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
         )
         self.entry = entry
         self._client: SnapmakerClient | None = None
-        self.popstatus: PopStatusClient | None = None
         self._last_print_state: str | None = None
 
     # ------------------------------------------------------------------
@@ -79,15 +75,6 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
 
         # Start WebSocket (reconnects automatically in the background)
         await self._client.async_start()
-
-        # Optional BIQU PopStatus light bar (a separate Wi-Fi device)
-        popstatus_host = (self.entry.options.get(CONF_POPSTATUS_HOST) or "").strip()
-        if popstatus_host:
-            self.popstatus = PopStatusClient(
-                popstatus_host, async_get_clientsession(self.hass)
-            )
-            self.popstatus.register_callback(self.async_update_listeners)
-            self.popstatus.start()
         return True
 
     def _schedule_reload(self) -> None:
@@ -107,8 +94,6 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
 
     async def async_shutdown(self) -> None:
         """Clean up client resources."""
-        if self.popstatus:
-            await self.popstatus.stop()
         if self._client:
             self._client.remove_callback(self._async_push_update)
             await self._client.async_stop()

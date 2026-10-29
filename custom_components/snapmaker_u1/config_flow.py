@@ -7,6 +7,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
@@ -17,18 +18,21 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_API_KEY,
+    CONF_ENTRY_TYPE,
     CONF_HOST,
-    CONF_POPSTATUS_HOST,
     CONF_PORT,
+    CONF_PRINTER_ENTRY_ID,
     CONF_SCAN_INTERVAL,
     CONF_TEMPERATURE_UNIT,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TEMPERATURE_UNIT,
     DOMAIN,
+    ENTRY_TYPE_POPSTATUS,
     TEMP_UNIT_CELSIUS,
     TEMP_UNIT_FAHRENHEIT,
     TEMP_UNIT_SYSTEM,
+    is_popstatus_entry,
 )
 from .pysnapmaker.client import SnapmakerClient
 from .pysnapmaker.popstatus import PopStatusClient
@@ -57,10 +61,73 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Return the options flow handler."""
         return SnapmakerOptionsFlow(config_entry)
 
+    @classmethod
+    @callback
+    def async_supports_options_flow(cls, config_entry: ConfigEntry) -> bool:
+        """Options (poll interval, units) are for printers only."""
+        return not is_popstatus_entry(config_entry)
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step – enter printer IP / port / API key."""
+        """Ask what to add: a printer or a PopStatus light bar."""
+        return self.async_show_menu(step_id="user", menu_options=["printer", "popstatus"])
+
+    async def async_step_popstatus(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Add a BIQU PopStatus light bar."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            host = user_input[CONF_HOST].strip()
+            await self.async_set_unique_id(f"popstatus_{host.lower()}")
+            self._abort_if_unique_id_configured()
+            if await PopStatusClient.test_connection(
+                host, async_get_clientsession(self.hass)
+            ):
+                return self.async_create_entry(
+                    title=f"PopStatus ({host})",
+                    data={
+                        CONF_ENTRY_TYPE: ENTRY_TYPE_POPSTATUS,
+                        CONF_HOST: host,
+                        CONF_PRINTER_ENTRY_ID: user_input.get(CONF_PRINTER_ENTRY_ID, ""),
+                    },
+                )
+            errors["base"] = "popstatus_cannot_connect"
+        return self.async_show_form(
+            step_id="popstatus",
+            data_schema=self._popstatus_schema(user_input or {}),
+            errors=errors,
+        )
+
+    def _popstatus_schema(self, current: dict[str, Any]) -> vol.Schema:
+        """Address, plus which printer it belongs to (for the dashboard card)."""
+        printers = [
+            e
+            for e in self.hass.config_entries.async_entries(DOMAIN)
+            if not is_popstatus_entry(e)
+        ]
+        fields: dict[Any, Any] = {
+            vol.Required(CONF_HOST, default=current.get(CONF_HOST, "")): str,
+        }
+        if printers:
+            fields[
+                vol.Optional(
+                    CONF_PRINTER_ENTRY_ID,
+                    default=current.get(CONF_PRINTER_ENTRY_ID) or printers[0].entry_id,
+                )
+            ] = SelectSelector(
+                SelectSelectorConfig(
+                    options=[{"value": e.entry_id, "label": e.title} for e in printers],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
+        return vol.Schema(fields)
+
+    async def async_step_printer(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Add a printer – enter its IP / port / API key."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -87,7 +154,7 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
 
         return self.async_show_form(
-            step_id="user",
+            step_id="printer",
             data_schema=_STEP_USER_SCHEMA,
             errors=errors,
         )
@@ -98,6 +165,8 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle reconfiguration of an existing entry."""
         errors: dict[str, str] = {}
         entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        if entry is not None and is_popstatus_entry(entry):
+            return await self.async_step_reconfigure_popstatus(user_input)
 
         if user_input is not None:
             host = user_input[CONF_HOST].strip()
@@ -140,6 +209,33 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
+    async def async_step_reconfigure_popstatus(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Change a PopStatus light bar's address or printer."""
+        errors: dict[str, str] = {}
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        if user_input is not None:
+            host = user_input[CONF_HOST].strip()
+            if await PopStatusClient.test_connection(
+                host, async_get_clientsession(self.hass)
+            ):
+                return self.async_update_reload_and_abort(
+                    entry,
+                    title=f"PopStatus ({host})",
+                    data_updates={
+                        CONF_HOST: host,
+                        CONF_PRINTER_ENTRY_ID: user_input.get(CONF_PRINTER_ENTRY_ID, ""),
+                    },
+                )
+            errors["base"] = "popstatus_cannot_connect"
+        return self.async_show_form(
+            step_id="reconfigure_popstatus",
+            data_schema=self._popstatus_schema(user_input or dict(entry.data)),
+            errors=errors,
+        )
+
+
 class SnapmakerOptionsFlow(config_entries.OptionsFlow):
     """Handle options for the Snapmaker U1 integration."""
 
@@ -152,16 +248,8 @@ class SnapmakerOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage the options."""
-        errors: dict[str, str] = {}
         if user_input is not None:
-            popstatus = (user_input.get(CONF_POPSTATUS_HOST) or "").strip()
-            user_input[CONF_POPSTATUS_HOST] = popstatus
-            if popstatus and not await PopStatusClient.test_connection(
-                popstatus, async_get_clientsession(self.hass)
-            ):
-                errors[CONF_POPSTATUS_HOST] = "popstatus_cannot_connect"
-            else:
-                return self.async_create_entry(title="", data=user_input)
+            return self.async_create_entry(title="", data=user_input)
 
         current_interval = self._entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
@@ -188,14 +276,6 @@ class SnapmakerOptionsFlow(config_entries.OptionsFlow):
                         mode=SelectSelectorMode.DROPDOWN,
                     )
                 ),
-                vol.Optional(
-                    CONF_POPSTATUS_HOST,
-                    description={
-                        "suggested_value": (user_input or self._entry.options).get(
-                            CONF_POPSTATUS_HOST, ""
-                        )
-                    },
-                ): str,
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="init", data_schema=schema)

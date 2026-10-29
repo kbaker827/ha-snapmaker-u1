@@ -365,12 +365,12 @@ automation:
 
 The [BIQU PopStatus](https://biqu.equipment/products/biqu-popsatus-rhythm-sync-led)
 is a separate Wi-Fi light bar that shows the printer's status. To control it
-from Home Assistant, enter its address in the integration's options
-(**Settings → Devices & Services → Snapmaker U1 → Configure → BIQU PopStatus
-address**). Use its IP address or `PopStatus.local`. Home Assistant checks it
-can reach the device before saving.
+from Home Assistant, add it as its own entry: **Settings → Devices & Services →
+Add Integration → Snapmaker U1 → BIQU PopStatus light bar**. Enter its IP
+address (or `PopStatus.local`) and pick the printer it belongs to. Home
+Assistant checks it can reach the light bar before saving.
 
-It then appears as its own **PopStatus** device, linked to the printer:
+It appears as its own **PopStatus** device, linked to the printer:
 
 | Entity | What it does |
 |---|---|
@@ -378,17 +378,21 @@ It then appears as its own **PopStatus** device, linked to the printer:
 | `select.popstatus_light_mode` | **Simple** (one light style) or **Advanced** (an effect per printer state) |
 | `binary_sensor.popstatus_printer_connection` | On while the PopStatus is connected to the printer |
 
-On the dashboard card it adds a **Status bar** button to switch it on and off.
+On the dashboard card of the printer you picked, it adds a **Status bar**
+button to switch it on and off.
 
 Notes:
 - The PopStatus still needs to be set up and connected to your printer with
   BIQU's app or its own web page (`http://PopStatus.local`) first. Home Assistant
   only controls the light.
 - Effects and colours per printer state are set in the PopStatus web UI.
+- It works independently of the printer: its controls load and stay usable
+  even when the printer is switched off. They show `unavailable` only when the
+  light bar itself can't be reached.
 - It's controlled over the same local WebSocket its web page uses (tested
-  against its firmware 1.0.0). Its entities stay available when the printer is
-  off, and show `unavailable` only when the light bar itself can't be reached.
-- To remove it, clear the address in the options.
+  against its firmware 1.0.0).
+- To change its address or printer, use **⋮ → Reconfigure** on its entry. To
+  remove it, delete the entry.
 
 ---
 
@@ -483,7 +487,7 @@ automation:
 | Dashboard card not in the card picker / "Custom element doesn't exist" | Update to 1.10.0 or later, **restart Home Assistant**, then hard-refresh the browser (Ctrl+Shift+R); in the mobile app, use **Reset frontend cache** in the Companion app settings. The integration adds `/snapmaker_u1_static/snapmaker-u1-card.js` to Settings → Dashboards → ⋮ → **Resources** for you (and updates an entry you added by hand). Add the card to a dashboard you created (Settings → Dashboards); newer Home Assistant versions generate the default *Overview* automatically. YAML-mode dashboards: add that URL under `lovelace: resources:` as a `module` |
 | Card shows no nozzle tiles | Update to 1.7.2 or later |
 | Print File shows "Unavailable" | Update to 1.7.1 or later (older versions misread the printer's file list). It's also unavailable while the printer isn't ready or has no files in its storage |
-| PopStatus entities `unavailable` | Check the light bar is powered and that its address in the options is still right (open `http://<address>` in a browser; give it a fixed IP in your router so it doesn't change) |
+| PopStatus entities `unavailable` | Check the light bar is powered and its address is still right: open `http://<address>` in a browser, and fix it with ⋮ → Reconfigure on its entry if needed. Give it a fixed IP in your router so it doesn't change |
 | Top Cover entities missing | Plug the cover in and update the printer to firmware 1.3.0 or later. The entities appear by themselves once the printer detects the cover |
 | Panda Breath entities missing | Enable it in the printer's Firmware Config page first (Extended Firmware only), then reload the integration |
 | Temperatures show 0 after startup | Klipper may still be initialising; values update within seconds once it's ready |

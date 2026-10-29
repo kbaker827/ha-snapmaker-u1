@@ -9,10 +9,9 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
-from .coordinator import SnapmakerDataUpdateCoordinator
-from .popstatus_entity import PopStatusEntity
-from .pysnapmaker.popstatus import POPSTATUS_LIGHT_MODES
+from .const import is_popstatus_entry
+from .popstatus_entity import PopStatusEntity, get_popstatus
+from .pysnapmaker.popstatus import POPSTATUS_LIGHT_MODES, PopStatusClient
 
 
 async def async_setup_entry(
@@ -20,9 +19,8 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: SnapmakerDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    if coordinator.popstatus is not None:
-        async_add_entities([PopStatusLight(coordinator)])
+    if is_popstatus_entry(entry):
+        async_add_entities([PopStatusLight(hass, entry, get_popstatus(hass, entry))])
 
 
 class PopStatusLight(PopStatusEntity, LightEntity):
@@ -35,8 +33,10 @@ class PopStatusLight(PopStatusEntity, LightEntity):
     _attr_color_mode = ColorMode.BRIGHTNESS
     _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
 
-    def __init__(self, coordinator: SnapmakerDataUpdateCoordinator) -> None:
-        super().__init__(coordinator, "light")
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, client: PopStatusClient
+    ) -> None:
+        super().__init__(hass, entry, client, "light")
 
     @property
     def is_on(self) -> bool | None:

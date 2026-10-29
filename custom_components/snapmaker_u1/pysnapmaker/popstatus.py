@@ -85,8 +85,15 @@ class PopStatusClient:
         except Exception:  # noqa: BLE001
             return False
 
-    def register_callback(self, callback: Callable[[], None]) -> None:
+    def register_callback(self, callback: Callable[[], None]) -> Callable[[], None]:
+        """Call ``callback`` on every change; returns a function that removes it."""
         self._callbacks.append(callback)
+
+        def remove() -> None:
+            if callback in self._callbacks:
+                self._callbacks.remove(callback)
+
+        return remove
 
     def _notify(self) -> None:
         for cb in list(self._callbacks):
