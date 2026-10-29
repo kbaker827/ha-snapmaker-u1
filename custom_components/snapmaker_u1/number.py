@@ -99,6 +99,41 @@ STATIC_NUMBER_DESCRIPTIONS: list[SnapmakerNumberEntityDescription] = [
 ]
 
 
+def _top_cover_ready(coordinator: SnapmakerDataUpdateCoordinator) -> bool:
+    data = coordinator.data
+    return bool(data.is_ready and data.top_cover and data.top_cover.detected)
+
+
+TOP_COVER_NUMBERS: list[SnapmakerNumberEntityDescription] = [
+    SnapmakerNumberEntityDescription(
+        key="top_cover_exhaust_fan",
+        translation_key="top_cover_exhaust_fan",
+        native_unit_of_measurement=PERCENTAGE,
+        native_min_value=0,
+        native_max_value=100,
+        native_step=1,
+        mode=NumberMode.SLIDER,
+        icon="mdi:fan-chevron-up",
+        value_fn=lambda coordinator: round(coordinator.data.top_cover.exhaust_speed * 100),
+        set_fn=lambda client, v: client.set_top_cover_fan("exhaust", v),
+        available_fn=_top_cover_ready,
+    ),
+    SnapmakerNumberEntityDescription(
+        key="top_cover_circulation_fan",
+        translation_key="top_cover_circulation_fan",
+        native_unit_of_measurement=PERCENTAGE,
+        native_min_value=0,
+        native_max_value=100,
+        native_step=1,
+        mode=NumberMode.SLIDER,
+        icon="mdi:fan-auto",
+        value_fn=lambda coordinator: round(coordinator.data.top_cover.circulation_speed * 100),
+        set_fn=lambda client, v: client.set_top_cover_fan("inner", v),
+        available_fn=_top_cover_ready,
+    ),
+]
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -156,6 +191,10 @@ async def async_setup_entry(
             available_fn=lambda coordinator: coordinator.data.is_ready,
         )
         entities.append(SnapmakerNumberEntity(coordinator, desc))
+
+    # Official Top Cover fans
+    if coordinator.client and coordinator.client.has_top_cover:
+        entities.extend(SnapmakerNumberEntity(coordinator, d) for d in TOP_COVER_NUMBERS)
 
     async_add_entities(entities)
 

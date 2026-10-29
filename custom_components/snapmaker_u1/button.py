@@ -93,6 +93,20 @@ BUTTON_DESCRIPTIONS: list[SnapmakerButtonEntityDescription] = [
 ]
 
 
+# Official Top Cover: press after fitting a new filter
+TOP_COVER_FILTER_RESET = SnapmakerButtonEntityDescription(
+    key="top_cover_reset_filter",
+    translation_key="top_cover_reset_filter",
+    icon="mdi:air-filter",
+    press_fn=lambda client: client.reset_top_cover_filter(),
+    available_fn=lambda coordinator: bool(
+        coordinator.data.is_ready
+        and coordinator.data.top_cover
+        and coordinator.data.top_cover.detected
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -101,9 +115,11 @@ async def async_setup_entry(
     """Set up Snapmaker U1 buttons from a config entry."""
     coordinator: SnapmakerDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
+    descriptions = list(BUTTON_DESCRIPTIONS)
+    if coordinator.client and coordinator.client.has_top_cover:
+        descriptions.append(TOP_COVER_FILTER_RESET)
     async_add_entities(
-        SnapmakerButton(coordinator, description)
-        for description in BUTTON_DESCRIPTIONS
+        SnapmakerButton(coordinator, description) for description in descriptions
     )
 
 

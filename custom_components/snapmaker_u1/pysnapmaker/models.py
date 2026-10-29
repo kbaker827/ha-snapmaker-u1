@@ -38,6 +38,28 @@ class ChamberHeaterData:
     max_temp: float = 80.0
 
 
+# Snapmaker's purifier modes (SET_PURIFIER_MODE MODE=...)
+PURIFIER_MODE_IDLE = 0
+PURIFIER_MODE_COOL = 1
+PURIFIER_MODE_PREHEAT = 2
+PURIFIER_MODE_HOT = 3
+
+
+@dataclass
+class TopCoverData:
+    """The official Top Cover's air purifier (Klipper ``purifier`` object)."""
+
+    detected: bool = False  # the cover is plugged in
+    mode: int = PURIFIER_MODE_IDLE
+    exhaust_speed: float = 0.0  # 0–1
+    circulation_speed: float = 0.0  # 0–1
+    circulation_rpm: Optional[float] = None
+    exhaust_delay: int = 0  # seconds the fan keeps running after it's switched off
+    circulation_delay: int = 0
+    filter_seconds: float = 0.0  # circulation fan run time since the last reset
+    desired_temp: float = 0.0
+
+
 @dataclass
 class FilamentSlot:
     """Filament loaded in one nozzle, as the U1 reports it.
@@ -147,6 +169,8 @@ class SnapmakerPrinterData:
     chamber_heaters: dict[str, ChamberHeaterData] = field(default_factory=dict)
     # Chamber filter / blower pins {"output_pin <name>": on}
     chamber_filters: dict[str, bool] = field(default_factory=dict)
+    # Official Top Cover (None when the firmware has no purifier object)
+    top_cover: Optional[TopCoverData] = None
 
     # Motion / overrides
     toolhead: Toolhead = field(default_factory=Toolhead)

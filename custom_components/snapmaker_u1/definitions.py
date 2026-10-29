@@ -23,6 +23,7 @@ from homeassistant.const import (
 from homeassistant.util import dt as dt_util
 
 from .coordinator import SnapmakerDataUpdateCoordinator
+from .pysnapmaker.const import TOP_COVER_FILTER_LIFE_HOURS
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +279,62 @@ def chamber_label(object_key: str) -> str:
             rest = name[len(raw):].strip("_").replace("_", " ").title()
             return f"{label} {rest}".strip()
     return name.replace("_", " ").title()
+
+
+# ---------------------------------------------------------------------------
+# Official Top Cover (air purifier); created only while the cover is plugged in
+# ---------------------------------------------------------------------------
+
+# Purifier mode number -> select option
+TOP_COVER_MODES: dict[int, str] = {0: "off", 1: "cooling", 2: "preheat", 3: "keep_warm"}
+
+
+def _top_cover_ready(self) -> bool:
+    data = self.coordinator.data
+    return bool(data.is_ready and data.top_cover and data.top_cover.detected)
+
+
+def _filter_hours(self) -> float:
+    return round(self.coordinator.data.top_cover.filter_seconds / 3600, 1)
+
+
+TOP_COVER_SENSORS: list[SnapmakerSensorEntityDescription] = [
+    SnapmakerSensorEntityDescription(
+        key="top_cover_filter_used",
+        translation_key="top_cover_filter_used",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement=UnitOfTime.HOURS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:air-filter",
+        value_fn=_filter_hours,
+        available_fn=_top_cover_ready,
+    ),
+    SnapmakerSensorEntityDescription(
+        key="top_cover_filter_life",
+        translation_key="top_cover_filter_life",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:air-filter",
+        value_fn=lambda self: max(
+            0.0, round(100 - _filter_hours(self) / TOP_COVER_FILTER_LIFE_HOURS * 100, 1)
+        ),
+        available_fn=_top_cover_ready,
+        extra_attributes_fn=lambda self: {"filter_life_hours": TOP_COVER_FILTER_LIFE_HOURS},
+    ),
+    SnapmakerSensorEntityDescription(
+        key="top_cover_circulation_rpm",
+        translation_key="top_cover_circulation_rpm",
+        native_unit_of_measurement="rpm",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:fan",
+        value_fn=lambda self: (
+            None
+            if self.coordinator.data.top_cover.circulation_rpm is None
+            else round(self.coordinator.data.top_cover.circulation_rpm)
+        ),
+        available_fn=_top_cover_ready,
+    ),
+]
 
 
 # ---------------------------------------------------------------------------

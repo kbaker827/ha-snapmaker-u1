@@ -94,7 +94,10 @@
       "nozzle_target": { "name": "Nozzle Target Temperature" },
       "speed_factor": { "name": "Print Speed" },
       "flow_rate": { "name": "Flow Rate" },
-      "chamber_temperature": { "name": "Temperature" }
+      "chamber_temperature": { "name": "Temperature" },
+      "top_cover_filter_used": { "name": "Top Cover Filter Used" },
+      "top_cover_filter_life": { "name": "Top Cover Filter Life" },
+      "top_cover_circulation_rpm": { "name": "Top Cover Circulation Fan RPM" }
     },
     "binary_sensor": {
       "printer_ready": { "name": "Printer Ready" },
@@ -111,7 +114,8 @@
       "home_x": { "name": "Home X" },
       "home_y": { "name": "Home Y" },
       "home_z": { "name": "Home Z" },
-      "restart_klipper": { "name": "Restart Klipper" }
+      "restart_klipper": { "name": "Restart Klipper" },
+      "top_cover_reset_filter": { "name": "Reset Top Cover Filter" }
     },
     "camera": {
       "webcam": { "name": "Webcam" }
@@ -121,11 +125,22 @@
       "fan_speed_setpoint": { "name": "Part Cooling Fan Speed" },
       "nozzle_target_setpoint": { "name": "Nozzle Target Temperature" },
       "speed_factor_setpoint": { "name": "Print Speed Override" },
-      "flow_rate_setpoint": { "name": "Flow Rate Override" }
+      "flow_rate_setpoint": { "name": "Flow Rate Override" },
+      "top_cover_exhaust_fan": { "name": "Top Cover Exhaust Fan" },
+      "top_cover_circulation_fan": { "name": "Top Cover Circulation Fan" }
     },
     "select": {
       "print_file": { "name": "Print File" },
-      "active_tool": { "name": "Active Tool" }
+      "active_tool": { "name": "Active Tool" },
+      "top_cover_mode": {
+        "name": "Top Cover Mode",
+        "state": {
+          "off": "Off",
+          "cooling": "Cooling",
+          "preheat": "Preheat",
+          "keep_warm": "Keep warm"
+        }
+      }
     },
     "switch": {
       "work_light": { "name": "Work Light" }

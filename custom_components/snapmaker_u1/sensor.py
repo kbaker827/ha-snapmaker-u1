@@ -17,6 +17,7 @@ from .definitions import (
     CHAMBER_SENSOR_TEMPLATE,
     EXTRUDER_SENSORS,
     PRINTER_SENSORS,
+    TOP_COVER_SENSORS,
     SnapmakerSensorEntityDescription,
     chamber_label,
     chamber_object_name,
@@ -119,6 +120,10 @@ async def async_setup_entry(
                 ),
             )
         )
+
+    # Official Top Cover (air purifier)
+    if coordinator.client and coordinator.client.has_top_cover:
+        entities.extend(SnapmakerSensor(coordinator, d) for d in TOP_COVER_SENSORS)
 
     async_add_entities(entities)
 

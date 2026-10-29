@@ -7,7 +7,7 @@
  * temperatures and print controls for one printer.
  */
 
-const CARD_VERSION = "1.10.1";
+const CARD_VERSION = "1.11.0";
 const DOMAIN = "snapmaker_u1";
 
 const ACCENTS = {
@@ -139,7 +139,7 @@ class SnapmakerU1Card extends HTMLElement {
       camera_mode: "live",
       show_controls: true,
       show_chamber_presets: true,
-      show_chamber_presets: true,
+      show_top_cover: true,
       accent_color: "theme",
     };
   }
@@ -413,6 +413,7 @@ class SnapmakerU1Card extends HTMLElement {
       ${active ? this._renderProgress(status) : this._renderIdle(status)}
       ${this._renderTemps()}
       ${this._config.show_chamber_presets !== false ? this._renderChamberPresets() : ""}
+      ${this._config.show_top_cover !== false ? this._renderTopCover() : ""}
       ${this._renderStats()}
       ${this._config.show_controls !== false ? this._renderControls(status, light) : ""}`;
   }
@@ -670,6 +671,41 @@ class SnapmakerU1Card extends HTMLElement {
     return rows.join("");
   }
 
+  // Official Top Cover: purifier mode buttons plus filter life.
+  _renderTopCover() {
+    const selectId = this._eid("select.top_cover_mode_select");
+    const select = selectId && this._hass.states[selectId];
+    if (!select) return "";
+    const disabled = select.state === "unavailable";
+    const life = num(this._state("sensor.top_cover_filter_life"));
+    const modes = [
+      ["off", "Off", "mdi:power"],
+      ["cooling", "Cooling", "mdi:snowflake"],
+      ["keep_warm", "Keep warm", "mdi:fire"],
+    ];
+    if (select.state === "preheat") modes.splice(2, 0, ["preheat", "Preheat", "mdi:heat-wave"]);
+    const chips = modes.map(([value, label, icon]) => {
+      const active = select.state === value;
+      return `
+        <button class="preset ${active ? (value === "off" ? "active-off" : "active") : ""}" data-action="cover-mode"
+          data-entity="${esc(selectId)}" data-option="${value}" ${disabled ? "disabled" : ""} title="Top Cover: ${label}">
+          <ha-icon icon="${icon}"></ha-icon>
+          <span class="preset-temp">${label}</span>
+        </button>`;
+    });
+    const filter =
+      life != null
+        ? `<button class="cover-filter ${life <= 10 ? "low" : ""}" data-action="more-info"
+            data-entity="${esc(this._eid("sensor.top_cover_filter_life"))}">
+            <ha-icon icon="mdi:air-filter"></ha-icon>Filter ${Math.round(life)}%</button>`
+        : "";
+    return `
+      <div class="presets cover">
+        <div class="presets-title"><ha-icon icon="mdi:air-purifier"></ha-icon>Top Cover${filter}</div>
+        <div class="preset-row">${chips.join("")}</div>
+      </div>`;
+  }
+
   _renderStats() {
     const stats = [
       ["sensor.speed_factor", "number.speed_factor", "mdi:speedometer", "Speed"],
@@ -793,6 +829,12 @@ class SnapmakerU1Card extends HTMLElement {
           this._hass.callService("switch", "toggle", { entity_id: this._eid(action.slice(7)) });
         }
         break;
+      case "cover-mode":
+        this._hass.callService("select", "select_option", {
+          entity_id: target.dataset.entity,
+          option: target.dataset.option,
+        });
+        break;
       case "preset":
         this._hass.callService("number", "set_value", {
           entity_id: target.dataset.entity,
@@ -839,6 +881,7 @@ class SnapmakerU1CardEditor extends HTMLElement {
           camera_mode: "Camera mode",
           show_controls: "Show controls",
           show_chamber_presets: "Show chamber heater presets",
+          show_top_cover: "Show Top Cover controls",
         })[schema.name] || schema.name;
       this._form.addEventListener("value-changed", (ev) => {
         this._config = ev.detail.value;
@@ -880,6 +923,7 @@ class SnapmakerU1CardEditor extends HTMLElement {
       },
       { name: "show_controls", selector: { boolean: {} } },
       { name: "show_chamber_presets", selector: { boolean: {} } },
+      { name: "show_top_cover", selector: { boolean: {} } },
     ];
     this._form.data = { ...SnapmakerU1Card.getStubConfig(), ...this._config };
   }
@@ -977,6 +1021,17 @@ const STYLES = `
   }
   .preset:disabled { opacity: .4; cursor: default; }
   .preset-name { font-size: 12px; font-weight: 600; }
+  .cover .preset-row { grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); }
+  .cover .preset { --mdc-icon-size: 18px; }
+  .cover .preset.active { border-color: var(--primary-color); background: color-mix(in srgb, var(--primary-color) 14%, transparent); }
+  .cover .preset.active .preset-temp, .cover .preset.active ha-icon { color: var(--primary-color); }
+  .cover .presets-title ha-icon { color: var(--state-fan-active-color, var(--primary-color)); }
+  .cover-filter {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+    border: none; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer;
+  }
+  .cover-filter.low { color: var(--error-color, #db4437); }
+  .cover-filter.low ha-icon { color: var(--error-color, #db4437); }
   .preset-temp { font-size: 11px; color: var(--secondary-text-color); }
   .preset.active { border-color: var(--state-climate-heat-color, #ff8100); background: color-mix(in srgb, var(--state-climate-heat-color, #ff8100) 14%, transparent); }
   .preset.active .preset-temp { color: var(--state-climate-heat-color, #ff8100); font-weight: 600; }
