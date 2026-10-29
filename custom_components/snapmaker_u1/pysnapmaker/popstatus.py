@@ -1,4 +1,4 @@
-"""Client for the BIQU PopStatus status light bar.
+"""Clients for BIQU's Wi-Fi printer accessories: PopStatus and PopKnomi.
 
 The PopStatus is a separate Wi-Fi device: it reads the printer's status from
 Moonraker on its own and has a web UI that talks to it over a WebSocket at
@@ -6,6 +6,9 @@ Moonraker on its own and has a web UI that talks to it over a WebSocket at
 e.g. ``{"rgb_switch": {"total_switch": 1}}``. The device pushes its settings
 when a client connects; this client keeps them and sends the same commands
 as the web UI (PopStatus firmware 1.0.0).
+
+The PopKnomi status display uses the same scheme; its settings live under
+``themeSettings`` (PopKnomi firmware 01.00.00.01).
 """
 from __future__ import annotations
 
@@ -185,6 +188,13 @@ class PopStatusClient:
             if isinstance(rgb_switch.get("current_light_mode"), int):
                 self.data.light_mode = rgb_switch["current_light_mode"]
                 changed = True
+        changed = self._handle_printer(msg) or changed
+        if changed:
+            self._notify()
+
+    def _handle_printer(self, msg: dict[str, Any]) -> bool:
+        """Link to the printer, reported the same way by every Pop device."""
+        changed = False
         printer = msg.get("printer")
         if isinstance(printer, dict):
             if isinstance(printer.get("state"), int):
@@ -193,8 +203,7 @@ class PopStatusClient:
             if printer.get("host"):
                 self.data.printer_host = str(printer["host"])
                 changed = True
-        if changed:
-            self._notify()
+        return changed
 
     async def _send(self, section: str, members: dict[str, Any]) -> None:
         if self._ws is None or self._ws.closed:
@@ -222,3 +231,71 @@ class PopStatusClient:
         await self._send("rgb_switch", {"current_light_mode": mode})
         self.data.light_mode = mode
         self._notify()
+
+
+# PopKnomi display settings, as offered in its web UI
+POPKNOMI_PRINT_PROGRESS = {0: "data", 1: "gif", 2: "alternate", 3: "overlay"}
+POPKNOMI_ERROR_DISPLAY = {0: "off", 1: "qr_code", 2: "gif"}
+POPKNOMI_SCREEN_OFF = {1: "never", 0: "standby", 2: "inactivity"}
+
+
+@dataclass
+class PopKnomiData:
+    """Last known PopKnomi state (None until the device reports it)."""
+
+    connected: bool = False
+    print_progress: Optional[int] = None
+    error_display: Optional[int] = None
+    screen_off: Optional[int] = None
+    printer_state: Optional[int] = None
+    printer_host: str = ""
+
+    @property
+    def printer_linked(self) -> bool:
+        return self.printer_state == POPSTATUS_PRINTER_CONNECTED
+
+
+class PopKnomiClient(PopStatusClient):
+    """BIQU PopKnomi status display: same connection, display settings."""
+
+    def __init__(self, host: str, session: aiohttp.ClientSession, **kwargs: Any) -> None:
+        super().__init__(host, session, **kwargs)
+        self.data = PopKnomiData()
+
+    def _handle(self, msg: dict[str, Any]) -> None:
+        changed = False
+        theme = msg.get("themeSettings")
+        if isinstance(theme, dict):
+            # The device reports the screen-off mode as "screen_off_mode" but
+            # takes it as "theme_screen_off_mode"; accept both.
+            for key, attr in (
+                ("theme_print_progress", "print_progress"),
+                ("theme_error_mode", "error_display"),
+                ("screen_off_mode", "screen_off"),
+                ("theme_screen_off_mode", "screen_off"),
+            ):
+                if isinstance(theme.get(key), int):
+                    setattr(self.data, attr, theme[key])
+                    changed = True
+        changed = self._handle_printer(msg) or changed
+        if changed:
+            self._notify()
+
+    async def _set_theme(self, key: str, attr: str, value: int, allowed: dict) -> None:
+        if value not in allowed:
+            raise ValueError(f"Unknown PopKnomi {attr} {value}")
+        await self._send("themeSettings", {key: value})
+        setattr(self.data, attr, value)
+        self._notify()
+
+    async def set_print_progress(self, mode: int) -> None:
+        """What the screen shows while printing (data, GIF, alternating, overlay)."""
+        await self._set_theme("theme_print_progress", "print_progress", mode, POPKNOMI_PRINT_PROGRESS)
+
+    async def set_error_display(self, mode: int) -> None:
+        """How errors are shown: off, QR code or GIF."""
+        await self._set_theme("theme_error_mode", "error_display", mode, POPKNOMI_ERROR_DISPLAY)
+
+    async def set_screen_off(self, mode: int) -> None:
+        """When the screen turns off: never, on standby, or after 30 min idle."""
+        await self._set_theme("theme_screen_off_mode", "screen_off", mode, POPKNOMI_SCREEN_OFF)

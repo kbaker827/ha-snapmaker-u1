@@ -5,6 +5,7 @@ Provides:
   - ActiveToolSelect – switch the active extruder (only on multi-extruder printers)
   - TopCoverModeSelect – official Top Cover purifier mode (cooling / keep warm)
   - PopStatusLightModeSelect – BIQU PopStatus Simple / Advanced light mode
+  - PopKnomiSettingSelect – BIQU PopKnomi progress / error / screen-off settings
 """
 from __future__ import annotations
 
@@ -16,11 +17,18 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, is_popstatus_entry
+from .const import DOMAIN, is_popknomi_entry, is_popstatus_entry
 from .coordinator import SnapmakerDataUpdateCoordinator
 from .definitions import TOP_COVER_MODES
 from .popstatus_entity import PopStatusEntity, get_popstatus
-from .pysnapmaker.popstatus import POPSTATUS_LIGHT_MODES, PopStatusClient
+from .pysnapmaker.popstatus import (
+    POPKNOMI_ERROR_DISPLAY,
+    POPKNOMI_PRINT_PROGRESS,
+    POPKNOMI_SCREEN_OFF,
+    POPSTATUS_LIGHT_MODES,
+    PopKnomiClient,
+    PopStatusClient,
+)
 from .sensor import SnapmakerBaseEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,6 +43,25 @@ async def async_setup_entry(
     if is_popstatus_entry(entry):
         async_add_entities(
             [PopStatusLightModeSelect(hass, entry, get_popstatus(hass, entry))]
+        )
+        return
+    if is_popknomi_entry(entry):
+        client: PopKnomiClient = get_popstatus(hass, entry)
+        async_add_entities(
+            [
+                PopKnomiSettingSelect(
+                    hass, entry, client, "print_progress", "mdi:progress-clock",
+                    POPKNOMI_PRINT_PROGRESS, client.set_print_progress,
+                ),
+                PopKnomiSettingSelect(
+                    hass, entry, client, "error_display", "mdi:alert-circle-outline",
+                    POPKNOMI_ERROR_DISPLAY, client.set_error_display,
+                ),
+                PopKnomiSettingSelect(
+                    hass, entry, client, "screen_off", "mdi:monitor-off",
+                    POPKNOMI_SCREEN_OFF, client.set_screen_off,
+                ),
+            ]
         )
         return
 
@@ -229,5 +256,39 @@ class PopStatusLightModeSelect(PopStatusEntity, SelectEntity):
             raise ServiceValidationError(f"Unknown PopStatus light mode {option}")
         try:
             await self.popstatus.set_light_mode(mode)
+        except ConnectionError as exc:
+            raise HomeAssistantError(str(exc)) from exc
+
+
+class PopKnomiSettingSelect(PopStatusEntity, SelectEntity):
+    """One of the PopKnomi display settings (``attr`` on its data)."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        client: PopKnomiClient,
+        attr: str,
+        icon: str,
+        choices: dict[int, str],
+        setter,
+    ) -> None:
+        super().__init__(hass, entry, client, attr)
+        self._data_attr = attr
+        self._choices = choices
+        self._setter = setter
+        self._attr_icon = icon
+        self._attr_options = list(choices.values())
+
+    @property
+    def current_option(self) -> str | None:
+        return self._choices.get(getattr(self.popstatus.data, self._data_attr))
+
+    async def async_select_option(self, option: str) -> None:
+        value = next((v for v, name in self._choices.items() if name == option), None)
+        if value is None:
+            raise ServiceValidationError(f"Unknown option {option}")
+        try:
+            await self._setter(value)
         except ConnectionError as exc:
             raise HomeAssistantError(str(exc)) from exc

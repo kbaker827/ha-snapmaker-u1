@@ -18,7 +18,7 @@ from homeassistant.components import frontend, websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import CONF_PRINTER_ENTRY_ID, DOMAIN, is_popstatus_entry
+from .const import CONF_ENTRY_TYPE, CONF_PRINTER_ENTRY_ID, DOMAIN, is_accessory_entry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ def ws_entities(
     entries = hass.config_entries.async_entries(DOMAIN)
     printers: list[dict[str, Any]] = []
     for entry in entries:
-        if is_popstatus_entry(entry):
+        if is_accessory_entry(entry):
             continue
         entities: dict[str, str] = {}
 
@@ -158,10 +158,12 @@ def ws_entities(
                 entities[f"{reg_entry.domain}.{role_prefix}{key}"] = reg_entry.entity_id
 
         add_roles(entry.entry_id, f"{entry.data.get('host', '')}_")
-        # A PopStatus light bar linked to this printer: roles "light.popstatus_light", ...
+        # BIQU accessories linked to this printer, with roles such as
+        # "light.popstatus_light" or "select.popknomi_screen_off".
         for pop in entries:
-            if is_popstatus_entry(pop) and pop.data.get(CONF_PRINTER_ENTRY_ID) == entry.entry_id:
-                add_roles(pop.entry_id, f"popstatus_{pop.entry_id}_", "popstatus_")
+            if is_accessory_entry(pop) and pop.data.get(CONF_PRINTER_ENTRY_ID) == entry.entry_id:
+                kind = pop.data[CONF_ENTRY_TYPE]
+                add_roles(pop.entry_id, f"{kind}_{pop.entry_id}_", f"{kind}_")
         coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
         printers.append(
             {

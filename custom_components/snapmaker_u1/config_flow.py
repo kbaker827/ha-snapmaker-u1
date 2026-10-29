@@ -28,11 +28,12 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TEMPERATURE_UNIT,
     DOMAIN,
+    ENTRY_TYPE_POPKNOMI,
     ENTRY_TYPE_POPSTATUS,
     TEMP_UNIT_CELSIUS,
     TEMP_UNIT_FAHRENHEIT,
     TEMP_UNIT_SYSTEM,
-    is_popstatus_entry,
+    is_accessory_entry,
 )
 from .pysnapmaker.client import SnapmakerClient
 from .pysnapmaker.popstatus import PopStatusClient
@@ -50,8 +51,12 @@ _STEP_USER_SCHEMA = vol.Schema(
 )
 
 
-def _popstatus_unique_id(host: str) -> str:
-    return f"popstatus_{host.strip().lower()}"
+# BIQU accessories that can be added: entry type -> display name
+_ACCESSORY_NAMES = {ENTRY_TYPE_POPSTATUS: "PopStatus", ENTRY_TYPE_POPKNOMI: "PopKnomi"}
+
+
+def _accessory_unique_id(kind: str, host: str) -> str:
+    return f"{kind}_{host.strip().lower()}"
 
 
 class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -69,37 +74,51 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_supports_options_flow(cls, config_entry: ConfigEntry) -> bool:
         """Options (poll interval, units) are for printers only."""
-        return not is_popstatus_entry(config_entry)
+        return not is_accessory_entry(config_entry)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Ask what to add: a printer or a PopStatus light bar."""
-        return self.async_show_menu(step_id="user", menu_options=["printer", "popstatus"])
+        """Ask what to add: a printer or one of BIQU's accessories."""
+        return self.async_show_menu(
+            step_id="user", menu_options=["printer", "popstatus", "popknomi"]
+        )
 
     async def async_step_popstatus(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Add a BIQU PopStatus light bar."""
+        return await self._async_step_accessory(ENTRY_TYPE_POPSTATUS, user_input)
+
+    async def async_step_popknomi(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Add a BIQU PopKnomi status display."""
+        return await self._async_step_accessory(ENTRY_TYPE_POPKNOMI, user_input)
+
+    async def _async_step_accessory(
+        self, kind: str, user_input: dict[str, Any] | None
+    ) -> FlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             host = user_input[CONF_HOST].strip()
-            await self.async_set_unique_id(_popstatus_unique_id(host))
+            await self.async_set_unique_id(_accessory_unique_id(kind, host))
             self._abort_if_unique_id_configured()
+            # Both devices use the same WebSocket and push their settings on connect.
             if await PopStatusClient.test_connection(
                 host, async_get_clientsession(self.hass)
             ):
                 return self.async_create_entry(
-                    title=f"PopStatus ({host})",
+                    title=f"{_ACCESSORY_NAMES[kind]} ({host})",
                     data={
-                        CONF_ENTRY_TYPE: ENTRY_TYPE_POPSTATUS,
+                        CONF_ENTRY_TYPE: kind,
                         CONF_HOST: host,
                         CONF_PRINTER_ENTRY_ID: user_input.get(CONF_PRINTER_ENTRY_ID, ""),
                     },
                 )
-            errors["base"] = "popstatus_cannot_connect"
+            errors["base"] = "accessory_cannot_connect"
         return self.async_show_form(
-            step_id="popstatus",
+            step_id=kind,
             data_schema=self._popstatus_schema(user_input or {}),
             errors=errors,
         )
@@ -109,7 +128,7 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         printers = [
             e
             for e in self.hass.config_entries.async_entries(DOMAIN)
-            if not is_popstatus_entry(e)
+            if not is_accessory_entry(e)
         ]
         fields: dict[Any, Any] = {
             vol.Required(CONF_HOST, default=current.get(CONF_HOST, "")): str,
@@ -169,8 +188,8 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle reconfiguration of an existing entry."""
         errors: dict[str, str] = {}
         entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
-        if entry is not None and is_popstatus_entry(entry):
-            return await self.async_step_reconfigure_popstatus(user_input)
+        if entry is not None and is_accessory_entry(entry):
+            return await self.async_step_reconfigure_accessory(user_input)
 
         if user_input is not None:
             host = user_input[CONF_HOST].strip()
@@ -213,15 +232,16 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
-    async def async_step_reconfigure_popstatus(
+    async def async_step_reconfigure_accessory(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Change a PopStatus light bar's address or printer."""
+        """Change a PopStatus / PopKnomi's address or printer."""
         errors: dict[str, str] = {}
         entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        kind = entry.data[CONF_ENTRY_TYPE]
         if user_input is not None:
             host = user_input[CONF_HOST].strip()
-            unique_id = _popstatus_unique_id(host)
+            unique_id = _accessory_unique_id(kind, host)
             # The add step uses the address to spot duplicates, so keep the ID
             # in step with it and don't move onto another entry's address.
             if any(
@@ -235,17 +255,18 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.hass.config_entries.async_update_entry(entry, unique_id=unique_id)
                 return self.async_update_reload_and_abort(
                     entry,
-                    title=f"PopStatus ({host})",
+                    title=f"{_ACCESSORY_NAMES[kind]} ({host})",
                     data_updates={
                         CONF_HOST: host,
                         CONF_PRINTER_ENTRY_ID: user_input.get(CONF_PRINTER_ENTRY_ID, ""),
                     },
                 )
-            errors["base"] = "popstatus_cannot_connect"
+            errors["base"] = "accessory_cannot_connect"
         return self.async_show_form(
-            step_id="reconfigure_popstatus",
+            step_id="reconfigure_accessory",
             data_schema=self._popstatus_schema(user_input or dict(entry.data)),
             errors=errors,
+            description_placeholders={"device": _ACCESSORY_NAMES[kind]},
         )
 
 

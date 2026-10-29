@@ -13,8 +13,11 @@ CONF_TEMPERATURE_UNIT = "temperature_unit"
 # PopStatus light bar is its own entry, linked to a printer entry.
 CONF_ENTRY_TYPE = "entry_type"
 ENTRY_TYPE_POPSTATUS = "popstatus"
+ENTRY_TYPE_POPKNOMI = "popknomi"
+ACCESSORY_ENTRY_TYPES = (ENTRY_TYPE_POPSTATUS, ENTRY_TYPE_POPKNOMI)
 CONF_PRINTER_ENTRY_ID = "printer_entry_id"
-DATA_POPSTATUS = f"{DOMAIN}_popstatus"  # hass.data key: entry_id -> PopStatusClient
+# hass.data key: entry_id -> PopStatusClient / PopKnomiClient
+DATA_POPSTATUS = f"{DOMAIN}_popstatus"
 
 # Unit used for every printer temperature. 3D printing works in °C, so that is
 # the default even when Home Assistant itself is set to °F.
@@ -33,3 +36,13 @@ COORDINATOR_TIMEOUT = 30
 def is_popstatus_entry(entry) -> bool:
     """True for a PopStatus config entry (False for a printer)."""
     return entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_POPSTATUS
+
+
+def is_popknomi_entry(entry) -> bool:
+    """True for a PopKnomi status display entry."""
+    return entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_POPKNOMI
+
+
+def is_accessory_entry(entry) -> bool:
+    """True for a BIQU accessory entry (PopStatus, PopKnomi), not a printer."""
+    return entry.data.get(CONF_ENTRY_TYPE) in ACCESSORY_ENTRY_TYPES
