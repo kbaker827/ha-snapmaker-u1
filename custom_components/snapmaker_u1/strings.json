@@ -2,6 +2,23 @@
   "config": {
     "step": {
       "user": {
+        "title": "Add to Snapmaker U1",
+        "description": "What would you like to add?",
+        "menu_options": {
+          "printer": "Snapmaker U1 printer",
+          "popstatus": "BIQU PopStatus light bar"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Snapmaker U1",
+        "description": "Update the connection settings for your Snapmaker U1.",
+        "data": {
+          "host": "IP Address or Hostname",
+          "port": "Port",
+          "api_key": "API Key (optional)"
+        }
+      },
+      "printer": {
         "title": "Connect to Snapmaker U1",
         "description": "Enter the IP address of your Snapmaker U1 printer. Leave the API key blank if your printer uses the default trusted LAN client configuration.",
         "data": {
@@ -14,21 +31,31 @@
           "api_key": "Only required if you have configured authentication in Moonraker."
         }
       },
-      "reconfigure": {
-        "title": "Reconfigure Snapmaker U1",
-        "description": "Update the connection settings for your Snapmaker U1.",
+      "popstatus": {
+        "title": "Add a BIQU PopStatus",
+        "description": "Enter the IP address or hostname of your PopStatus light bar (e.g. 192.168.1.60 or PopStatus.local). Set it up and connect it to your printer in BIQU's app or its own web page first.",
         "data": {
-          "host": "IP Address or Hostname",
-          "port": "Port",
-          "api_key": "API Key (optional)"
+          "host": "PopStatus address",
+          "printer_entry_id": "Printer"
+        },
+        "data_description": {
+          "printer_entry_id": "The printer it belongs to; its dashboard card gets a Status bar button."
+        }
+      },
+      "reconfigure_popstatus": {
+        "title": "Reconfigure PopStatus",
+        "data": {
+          "host": "PopStatus address",
+          "printer_entry_id": "Printer"
         }
       }
     },
     "error": {
-      "cannot_connect": "Unable to connect to the printer. Please check the IP address and that the printer is powered on and on the same network."
+      "cannot_connect": "Unable to connect to the printer. Please check the IP address and that the printer is powered on and on the same network.",
+      "popstatus_cannot_connect": "Can't reach a PopStatus at that address. Check it's powered on and on the same network (open its address in a browser to test)."
     },
     "abort": {
-      "already_configured": "This printer is already configured."
+      "already_configured": "This device is already configured."
     }
   },
   "options": {
@@ -103,7 +130,8 @@
       "printer_ready": { "name": "Printer Ready" },
       "is_printing": { "name": "Printing" },
       "is_paused": { "name": "Paused" },
-      "has_error": { "name": "Error" }
+      "has_error": { "name": "Error" },
+      "popstatus_printer_link": { "name": "Printer connection" }
     },
     "button": {
       "pause_print": { "name": "Pause Print" },
@@ -140,10 +168,20 @@
           "preheat": "Preheat",
           "keep_warm": "Keep warm"
         }
+      },
+      "popstatus_light_mode": {
+        "name": "Light mode",
+        "state": {
+          "simple": "Simple",
+          "advanced": "Advanced"
+        }
       }
     },
     "switch": {
       "work_light": { "name": "Work Light" }
+    },
+    "light": {
+      "popstatus_light": { "name": "Light" }
     }
   },
   "device_automation": {

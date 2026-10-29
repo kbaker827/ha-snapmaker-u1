@@ -12,12 +12,14 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, is_popstatus_entry
 from .coordinator import SnapmakerDataUpdateCoordinator
 from .definitions import (
     PRINTER_BINARY_SENSORS,
     SnapmakerBinarySensorEntityDescription,
 )
+from .popstatus_entity import PopStatusEntity, get_popstatus
+from .pysnapmaker.popstatus import PopStatusClient
 from .sensor import SnapmakerBaseEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -29,6 +31,10 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Snapmaker U1 binary sensors from a config entry."""
+    if is_popstatus_entry(entry):
+        async_add_entities([PopStatusPrinterLink(hass, entry, get_popstatus(hass, entry))])
+        return
+
     coordinator: SnapmakerDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     entities: list[BinarySensorEntity] = [
@@ -147,3 +153,20 @@ class SnapmakerFilamentBinarySensor(SnapmakerBinarySensor):
         host = coordinator.entry.data["host"]
         self._attr_unique_id = f"{host}_filament_{sensor_key}"
         self._attr_has_entity_name = False  # Use full name set in description
+
+
+class PopStatusPrinterLink(PopStatusEntity, BinarySensorEntity):
+    """On while the PopStatus is connected to (reading status from) the printer."""
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, client: PopStatusClient
+    ) -> None:
+        super().__init__(hass, entry, client, "printer_link")
+
+    @property
+    def is_on(self) -> bool | None:
+        if self.popstatus.data.printer_state is None:
+            return None
+        return self.popstatus.data.printer_linked

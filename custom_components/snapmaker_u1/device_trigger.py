@@ -18,6 +18,7 @@ from homeassistant.components.homeassistant.triggers import event as event_trigg
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_DEVICE_ID, CONF_DOMAIN, CONF_PLATFORM, CONF_TYPE
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.trigger import TriggerActionType, TriggerInfo
 
 from .const import DOMAIN
@@ -49,6 +50,12 @@ async def async_get_triggers(
     hass: HomeAssistant, device_id: str
 ) -> list[dict]:
     """Return a list of triggers for the given device."""
+    device = dr.async_get(hass).async_get(device_id)
+    if device is not None and any(
+        domain == DOMAIN and str(ident).startswith("popstatus_")
+        for domain, ident in device.identifiers
+    ):
+        return []  # print triggers belong to the printer, not the light bar
     return [
         {
             CONF_PLATFORM: "device",

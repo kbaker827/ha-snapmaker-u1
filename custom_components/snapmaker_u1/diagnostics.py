@@ -12,7 +12,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_API_KEY, DOMAIN
+from .const import CONF_API_KEY, DATA_POPSTATUS, DOMAIN, is_popstatus_entry
 from .coordinator import SnapmakerDataUpdateCoordinator
 
 _REDACT = {CONF_API_KEY}
@@ -22,6 +22,13 @@ async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
     """Return diagnostics for a config entry."""
+    if is_popstatus_entry(entry):
+        client = hass.data.get(DATA_POPSTATUS, {}).get(entry.entry_id)
+        return {
+            "entry_type": "popstatus",
+            "host": client.host if client else entry.data.get("host"),
+            "state": dataclasses.asdict(client.data) if client else None,
+        }
     coordinator: SnapmakerDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     data = coordinator.data
 

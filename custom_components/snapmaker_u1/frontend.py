@@ -18,7 +18,7 @@ from homeassistant.components import frontend, websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN
+from .const import CONF_PRINTER_ENTRY_ID, DOMAIN, is_popstatus_entry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -143,15 +143,25 @@ def ws_entities(
     ``sensor.extruder1_temperature`` or ``number.bed_target``.
     """
     registry = er.async_get(hass)
+    entries = hass.config_entries.async_entries(DOMAIN)
     printers: list[dict[str, Any]] = []
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        prefix = f"{entry.data.get('host', '')}_"
+    for entry in entries:
+        if is_popstatus_entry(entry):
+            continue
         entities: dict[str, str] = {}
-        for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
-            if reg_entry.disabled_by or not reg_entry.unique_id.startswith(prefix):
-                continue
-            role = f"{reg_entry.domain}.{reg_entry.unique_id[len(prefix):]}"
-            entities[role] = reg_entry.entity_id
+
+        def add_roles(source_entry_id: str, prefix: str, role_prefix: str = "") -> None:
+            for reg_entry in er.async_entries_for_config_entry(registry, source_entry_id):
+                if reg_entry.disabled_by or not reg_entry.unique_id.startswith(prefix):
+                    continue
+                key = reg_entry.unique_id[len(prefix):]
+                entities[f"{reg_entry.domain}.{role_prefix}{key}"] = reg_entry.entity_id
+
+        add_roles(entry.entry_id, f"{entry.data.get('host', '')}_")
+        # A PopStatus light bar linked to this printer: roles "light.popstatus_light", ...
+        for pop in entries:
+            if is_popstatus_entry(pop) and pop.data.get(CONF_PRINTER_ENTRY_ID) == entry.entry_id:
+                add_roles(pop.entry_id, f"popstatus_{pop.entry_id}_", "popstatus_")
         coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
         printers.append(
             {
