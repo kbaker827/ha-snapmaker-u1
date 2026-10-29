@@ -12,7 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, is_popstatus_entry
+from .const import DOMAIN, is_accessory_entry
 from .coordinator import SnapmakerDataUpdateCoordinator
 from .definitions import (
     PRINTER_BINARY_SENSORS,
@@ -31,7 +31,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Snapmaker U1 binary sensors from a config entry."""
-    if is_popstatus_entry(entry):
+    if is_accessory_entry(entry):
         async_add_entities([PopStatusPrinterLink(hass, entry, get_popstatus(hass, entry))])
         return
 

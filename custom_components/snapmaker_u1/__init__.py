@@ -21,7 +21,8 @@ from .const import (
     DOMAIN,
     TEMP_UNIT_CELSIUS,
     TEMP_UNIT_FAHRENHEIT,
-    is_popstatus_entry,
+    is_accessory_entry,
+    is_popknomi_entry,
 )
 from .coordinator import SnapmakerDataUpdateCoordinator
 from .frontend import (
@@ -29,7 +30,7 @@ from .frontend import (
     async_register_frontend,
     async_remove_lovelace_resource,
 )
-from .pysnapmaker.popstatus import PopStatusClient
+from .pysnapmaker.popstatus import PopKnomiClient, PopStatusClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,6 +51,15 @@ POPSTATUS_PLATFORMS: list[Platform] = [
     Platform.LIGHT,
     Platform.SELECT,
 ]
+# A BIQU PopKnomi status display entry
+POPKNOMI_PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.SELECT,
+]
+
+
+def _accessory_platforms(entry: ConfigEntry) -> list[Platform]:
+    return POPKNOMI_PLATFORMS if is_popknomi_entry(entry) else POPSTATUS_PLATFORMS
 
 # Service names
 SERVICE_EXECUTE_GCODE = "execute_gcode"
@@ -153,7 +163,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Snapmaker U1 from a config entry."""
-    if is_popstatus_entry(entry):
+    if is_accessory_entry(entry):
         return await _async_setup_popstatus(hass, entry)
 
     coordinator = SnapmakerDataUpdateCoordinator(hass, entry)
@@ -216,15 +226,18 @@ def _apply_temperature_unit(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def _async_setup_popstatus(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up a BIQU PopStatus light bar.
+    """Set up a BIQU PopStatus light bar or PopKnomi display.
 
     Independent of the printer: the entities exist right away and show
-    unavailable until the light bar answers (the client keeps retrying).
+    unavailable until the device answers (the client keeps retrying).
     """
-    client = PopStatusClient(entry.data[CONF_HOST], async_get_clientsession(hass))
+    client_cls = PopKnomiClient if is_popknomi_entry(entry) else PopStatusClient
+    client = client_cls(entry.data[CONF_HOST], async_get_clientsession(hass))
     hass.data.setdefault(DATA_POPSTATUS, {})[entry.entry_id] = client
     client.start()
-    await hass.config_entries.async_forward_entry_setups(entry, POPSTATUS_PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(
+        entry, _accessory_platforms(entry)
+    )
     await async_ensure_card_resource(hass)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
@@ -237,9 +250,9 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    if is_popstatus_entry(entry):
+    if is_accessory_entry(entry):
         if not await hass.config_entries.async_unload_platforms(
-            entry, POPSTATUS_PLATFORMS
+            entry, _accessory_platforms(entry)
         ):
             return False
         client = hass.data.get(DATA_POPSTATUS, {}).pop(entry.entry_id, None)

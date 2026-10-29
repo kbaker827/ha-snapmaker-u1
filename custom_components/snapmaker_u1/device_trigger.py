@@ -52,10 +52,10 @@ async def async_get_triggers(
     """Return a list of triggers for the given device."""
     device = dr.async_get(hass).async_get(device_id)
     if device is not None and any(
-        domain == DOMAIN and str(ident).startswith("popstatus_")
+        domain == DOMAIN and str(ident).startswith(("popstatus_", "popknomi_"))
         for domain, ident in device.identifiers
     ):
-        return []  # print triggers belong to the printer, not the light bar
+        return []  # print triggers belong to the printer, not its accessories
     return [
         {
             CONF_PLATFORM: "device",

@@ -5,8 +5,8 @@
 > A Home Assistant custom integration for the **Snapmaker U1** 3D printer,
 > inspired by [ha-bambulab](https://github.com/greghesp/ha-bambulab).
 > Live status, temperatures, loaded filament colours, camera, print controls,
-> official Top Cover, BIQU Panda Breath and PopStatus support, and a built-in
-> dashboard card. No cloud needed.
+> official Top Cover, BIQU Panda Breath, PopStatus and PopKnomi support, and a
+> built-in dashboard card. No cloud needed.
 
 ![Snapmaker U1 dashboard card: printing (light and dark), paused and idle](docs/images/card-overview.png)
 
@@ -22,6 +22,7 @@ shows your printer's real camera and values.</sub>
 - [Panda Breath / DragonBreath chamber heater](#panda-breath--dragonbreath-chamber-heater)
 - [Official Top Cover](#official-top-cover)
 - [BIQU PopStatus light bar](#biqu-popstatus-light-bar)
+- [BIQU PopKnomi status display](#biqu-popknomi-status-display)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Authentication](#authentication)
@@ -396,6 +397,33 @@ Notes:
 
 ---
 
+## BIQU PopKnomi status display
+
+The [BIQU PopKnomi](https://biqu.equipment/products/biqu-popknomi-for-snapmaker-u1)
+is a small round Wi-Fi screen that shows the printer's status. Add it like the
+PopStatus: **Settings → Devices & Services → Add Integration → Snapmaker U1 →
+BIQU PopKnomi status display**, then enter its IP address and pick the printer
+it belongs to.
+
+It appears as its own **PopKnomi** device, linked to the printer:
+
+| Entity | What it does |
+|---|---|
+| `select.popknomi_print_progress_display` | What it shows while printing: **Printing data only**, **GIF only**, **Data and GIF alternately** or **Percentage over GIF** |
+| `select.popknomi_error_display` | How errors are shown: **Off**, **QR code** or **GIF** |
+| `select.popknomi_screen_off` | When the screen turns off: **Never**, **On standby** or **After 30 minutes idle** |
+| `binary_sensor.popknomi_printer_connection` | On while the PopKnomi is connected to the printer |
+
+Notes:
+- Set it up and connect it to your printer with BIQU's app or its own web page
+  first. GIFs and colours are managed there too.
+- Like the PopStatus, it works independently of the printer and uses the same
+  local WebSocket as its web page (tested against its firmware 01.00.00.01).
+- Example: turn the screen off at night with an automation that selects
+  **On standby** at 22:00 and **Never** at 07:00.
+
+---
+
 ## Installation
 
 ### HACS (recommended)
@@ -487,7 +515,7 @@ automation:
 | Dashboard card not in the card picker / "Custom element doesn't exist" | Update to 1.10.0 or later, **restart Home Assistant**, then hard-refresh the browser (Ctrl+Shift+R); in the mobile app, use **Reset frontend cache** in the Companion app settings. The integration adds `/snapmaker_u1_static/snapmaker-u1-card.js` to Settings → Dashboards → ⋮ → **Resources** for you (and updates an entry you added by hand). Add the card to a dashboard you created (Settings → Dashboards); newer Home Assistant versions generate the default *Overview* automatically. YAML-mode dashboards: add that URL under `lovelace: resources:` as a `module` |
 | Card shows no nozzle tiles | Update to 1.7.2 or later |
 | Print File shows "Unavailable" | Update to 1.7.1 or later (older versions misread the printer's file list). It's also unavailable while the printer isn't ready or has no files in its storage |
-| PopStatus entities `unavailable` | Check the light bar is powered and its address is still right: open `http://<address>` in a browser, and fix it with ⋮ → Reconfigure on its entry if needed. Give it a fixed IP in your router so it doesn't change |
+| PopStatus / PopKnomi entities `unavailable` | Check the light bar is powered and its address is still right: open `http://<address>` in a browser, and fix it with ⋮ → Reconfigure on its entry if needed. Give it a fixed IP in your router so it doesn't change |
 | Top Cover entities missing | Plug the cover in and update the printer to firmware 1.3.0 or later. The entities appear by themselves once the printer detects the cover |
 | Panda Breath entities missing | Enable it in the printer's Firmware Config page first (Extended Firmware only), then reload the integration |
 | Temperatures show 0 after startup | Klipper may still be initialising; values update within seconds once it's ready |
