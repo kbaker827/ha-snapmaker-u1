@@ -31,7 +31,8 @@ async def async_setup_entry(
     entities: list[SwitchEntity] = [WorkLightSwitch(coordinator)]
     filter_keys = coordinator.client.chamber_filter_keys if coordinator.client else []
     entities.extend(ChamberFilterSwitch(coordinator, key) for key in filter_keys)
-    if coordinator.client and coordinator.client.has_timelapse:
+    # Only the full timelapse plugin can be switched (not the firmware stub)
+    if coordinator.client and coordinator.client.has_timelapse_control:
         entities.append(TimelapseSwitch(coordinator))
     async_add_entities(entities)
 

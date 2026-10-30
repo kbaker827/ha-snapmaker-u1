@@ -85,6 +85,11 @@ _RE_CHAMBER_FILTER = re.compile(r"^output_pin\s+\S*(filter|breath)\S*$", re.IGNO
 # than the printer's actual camera (see the remote-screen add-on's
 # "[webcam gui]" Moonraker config entry).
 _SCREEN_MIRROR_WEBCAM_TOKENS = ("gui", "screen")
+_VIDEO_EXTENSIONS = (".mp4", ".mkv", ".webm", ".avi")
+
+
+def _is_video(name: str) -> bool:
+    return name.lower().endswith(_VIDEO_EXTENSIONS)
 
 # Hostnames that only make sense from the printer itself. Moonraker webcam
 # entries sometimes use these, which would point Home Assistant at itself.
@@ -173,6 +178,9 @@ class SnapmakerClient:
         # Optional Moonraker components (e.g. "spoolman", "timelapse")
         self._components: set[str] = set()
         self._has_exclude_object = False
+        # The full moonraker-timelapse plugin (not the Extended Firmware stub)
+        self._timelapse_controllable = False
+        self._timelapse_refresh_task: asyncio.Task | None = None
 
         # Reconnection backoff
         self._reconnect_delay = 5
@@ -231,6 +239,17 @@ class SnapmakerClient:
     @property
     def has_timelapse(self) -> bool:
         return "timelapse" in self._components
+
+    @property
+    def has_timelapse_control(self) -> bool:
+        """True when timelapse recording can be switched on and off.
+
+        The Extended Firmware only ships a stub of the timelapse plugin (so
+        Fluidd/Mainsail list the printer's own recordings): its settings are
+        always "off" and ignore changes. The full plugin reports its mode,
+        camera and so on as well.
+        """
+        return self._timelapse_controllable
 
     @property
     def has_exclude_object(self) -> bool:
@@ -343,8 +362,9 @@ class SnapmakerClient:
     async def async_stop(self) -> None:
         """Stop all connections and clean up."""
         self._should_reconnect = False
-        if self._file_list_refresh_task and not self._file_list_refresh_task.done():
-            self._file_list_refresh_task.cancel()
+        for task in (self._file_list_refresh_task, self._timelapse_refresh_task):
+            if task and not task.done():
+                task.cancel()
         if self._ws and not self._ws.closed:
             await self._ws.close()
         if self._ws_task and not self._ws_task.done():
@@ -604,20 +624,48 @@ class SnapmakerClient:
         if self.has_timelapse:
             try:
                 data = await self._get(ENDPOINT_TIMELAPSE_SETTINGS)
-                enabled = data.get("result", {}).get("enabled")
-                if enabled is not None:
-                    self._data.timelapse_enabled = bool(enabled)
-                files = await self._get(ENDPOINT_FILES_LIST, params={"root": "timelapse"})
-                videos = [
-                    f for f in files.get("result", [])
-                    if isinstance(f, dict)
-                    and str(f.get("path") or f.get("filename") or "").endswith((".mp4", ".mkv"))
-                ]
-                if videos:
-                    newest = max(videos, key=lambda f: f.get("modified") or 0)
-                    self._data.last_timelapse = newest.get("path") or newest.get("filename")
+                settings = data.get("result", {})
+                self._timelapse_controllable = isinstance(settings, dict) and "mode" in settings
+                if self._timelapse_controllable and settings.get("enabled") is not None:
+                    self._data.timelapse_enabled = bool(settings["enabled"])
             except Exception as exc:  # noqa: BLE001
-                _LOGGER.debug("Could not read the timelapse state: %s", exc)
+                _LOGGER.debug("Could not read the timelapse settings: %s", exc)
+            await self._fetch_last_timelapse()
+
+    async def _fetch_last_timelapse(self) -> bool:
+        """Newest video in Moonraker's "timelapse" root. True if it changed."""
+        try:
+            files = await self._get(ENDPOINT_FILES_LIST, params={"root": "timelapse"})
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("Could not list timelapses: %s", exc)
+            return False
+        videos = [
+            f for f in files.get("result", [])
+            if isinstance(f, dict) and _is_video(str(f.get("path") or f.get("filename") or ""))
+        ]
+        if not videos:
+            return False
+        newest = max(videos, key=lambda f: f.get("modified") or 0)
+        name = newest.get("path") or newest.get("filename")
+        if name == self._data.last_timelapse:
+            return False
+        self._data.last_timelapse = name
+        return True
+
+    def _schedule_timelapse_refresh(self) -> None:
+        """Look for a new video after a print; it can take a while to render."""
+        if not self.has_timelapse or (
+            self._timelapse_refresh_task and not self._timelapse_refresh_task.done()
+        ):
+            return
+
+        async def refresh() -> None:
+            for delay in (15, 60, 180, 600):
+                await asyncio.sleep(delay)
+                if await self._fetch_last_timelapse():
+                    await self._notify_callbacks()
+
+        self._timelapse_refresh_task = asyncio.create_task(refresh())
 
     def timelapse_url(self, filename: str) -> str:
         """Download URL of a file in Moonraker's "timelapse" root."""
@@ -769,7 +817,10 @@ class SnapmakerClient:
 
         elif method == WS_NOTIFY_FILELIST_CHANGED:
             # A file was uploaded, deleted or moved on the printer
-            if await self._apply_file_list_change(params):
+            changed = await self._apply_file_list_change(params)
+            if self._apply_timelapse_file_change(params):
+                changed = True
+            if changed:
                 await self._notify_callbacks()
 
         elif method == WS_NOTIFY_ACTIVE_SPOOL_SET:
@@ -797,6 +848,7 @@ class SnapmakerClient:
             # A print just finished; refresh state and file list
             await self._fetch_printer_state()
             await self.fetch_file_list()
+            self._schedule_timelapse_refresh()
 
     async def _process_status(self, status: dict[str, Any]) -> None:
         """Parse a Moonraker status dict and update the data model."""
@@ -1122,6 +1174,23 @@ class SnapmakerClient:
     async def fetch_state(self) -> None:
         """Public wrapper – refresh printer state via HTTP."""
         await self._fetch_printer_state()
+
+    def _apply_timelapse_file_change(self, params: Any) -> bool:
+        """A new video in the "timelapse" root becomes the last timelapse."""
+        if not self.has_timelapse:
+            return False
+        info = params[0] if isinstance(params, list) and params and isinstance(params[0], dict) else {}
+        item = info.get("item") if isinstance(info.get("item"), dict) else {}
+        path = item.get("path") if isinstance(item.get("path"), str) else ""
+        if (
+            info.get("action") in ("create_file", "move_file")
+            and item.get("root") == "timelapse"
+            and _is_video(path)
+            and path != self._data.last_timelapse
+        ):
+            self._data.last_timelapse = path
+            return True
+        return False
 
     async def _apply_file_list_change(self, params: Any) -> bool:
         """Update the cached file list from a notify_filelist_changed payload.

@@ -559,12 +559,14 @@ deducts the filament used by each print from that spool. For spool details
 
 ### Timelapse
 
-With the Moonraker timelapse plugin (included in the Extended Firmware):
+The Extended Firmware lists the printer's own timelapse recordings (made when
+timelapse is on in the slicer or on the touchscreen) in Moonraker's
+`timelapse` folder:
 
 | Entity | What it does |
 |---|---|
-| `switch.<printer>_timelapse` | Record a timelapse of each print on or off |
-| `sensor.<printer>_last_timelapse` | File name of the newest timelapse video; its `url` attribute is a download link |
+| `sensor.<printer>_last_timelapse` | File name of the newest timelapse video; its `url` attribute is a download link. Updates when a new video appears (checked again for a few minutes after each print, while it's still being written) |
+| `switch.<printer>_timelapse` | Record a timelapse of each print on or off. Only with the full [moonraker-timelapse](https://github.com/mainsail-crew/moonraker-timelapse) plugin; the Extended Firmware ships a stub that can't switch recording, so there the switch doesn't appear |
 
 Example: send the timelapse link when a video is ready.
 
@@ -692,7 +694,7 @@ automation:
 | PopStatus / PopKnomi entities `unavailable` | Check the device is powered and its address is still right: open `http://<address>` in a browser, and fix it with ⋮ → Reconfigure on its entry if needed. Give it a fixed IP in your router so it doesn't change |
 | Top Cover entities missing | Plug the cover in and update the printer to firmware 1.3.0 or later. The entities appear by themselves once the printer detects the cover |
 | Panda Breath entities missing | Enable it in the printer's Firmware Config page first (Extended Firmware only), then reload the integration |
-| USB camera, RTSP, Spoolman, timelapse or Screen button missing | Enable the feature in the Extended Firmware's Firmware Config page, then reload the integration (Settings → Devices & Services → Snapmaker U1 → ⋮ → Reload). They're detected when the integration starts |
+| USB camera, RTSP, Spoolman, Last Timelapse or Screen button missing | Enable the feature in the Extended Firmware's Firmware Config page, then reload the integration (Settings → Devices & Services → Snapmaker U1 → ⋮ → Reload). They're detected when the integration starts |
 | PopStatus / PopKnomi not in the Add Integration menu | Update to 1.12.0 (PopStatus) or 1.13.0 (PopKnomi) or later and restart Home Assistant |
 | Sensors fill up the recorder / database | Update to 1.13.1 or later: time sensors update at most every 10 s, the ETA once a minute, and Toolhead Position is off by default. To keep a sensor out of history entirely, exclude it in the [`recorder`](https://www.home-assistant.io/integrations/recorder/) settings |
 | Temperatures show 0 after startup | Klipper may still be initialising; values update within seconds once it's ready |
