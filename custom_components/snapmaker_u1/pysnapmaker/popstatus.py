@@ -47,6 +47,11 @@ class PopStatusData:
 class PopStatusClient:
     """Keeps a WebSocket open to a PopStatus and mirrors its light settings."""
 
+    # The device serves one client well: opening its web UI or a Wi-Fi blip
+    # can drop our connection. Stay "connected" for this long while
+    # reconnecting so entities don't flap to unavailable.
+    OFFLINE_GRACE = 60.0
+
     def __init__(
         self,
         host: str,
@@ -62,6 +67,7 @@ class PopStatusClient:
         self._reconnect_delay = reconnect_delay
         self._max_reconnect_delay = max_reconnect_delay
         self._callbacks: list[Callable[[], None]] = []
+        self._offline_timer: Optional[asyncio.TimerHandle] = None
         self.data = PopStatusData()
 
     @property
@@ -129,6 +135,7 @@ class PopStatusClient:
 
     async def stop(self) -> None:
         self._running = False
+        self._cancel_offline_timer()
         if self._ws is not None and not self._ws.closed:
             await self._ws.close()
         if self._task is not None and not self._task.done():
@@ -138,14 +145,29 @@ class PopStatusClient:
             except asyncio.CancelledError:
                 pass
 
+    def _cancel_offline_timer(self) -> None:
+        if self._offline_timer is not None:
+            self._offline_timer.cancel()
+            self._offline_timer = None
+
+    def _go_offline(self) -> None:
+        self._offline_timer = None
+        if self.data.connected:
+            _LOGGER.warning("PopStatus at %s is offline", self.host)
+            self.data.connected = False
+            self._notify()
+
     async def _loop(self) -> None:
         delay = self._reconnect_delay
         while self._running:
             was_up = False
             try:
-                async with self._session.ws_connect(self.ws_url, heartbeat=20) as ws:
+                # heartbeat=30: the device must answer a ping within 15 s.
+                async with self._session.ws_connect(self.ws_url, heartbeat=30) as ws:
                     self._ws = ws
-                    self.data.connected = was_up = True
+                    was_up = True
+                    self._cancel_offline_timer()
+                    self.data.connected = True
                     _LOGGER.info("Connected to PopStatus at %s", self.host)
                     self._notify()
                     async for msg in ws:
@@ -156,19 +178,28 @@ class PopStatusClient:
                                 _LOGGER.debug("Bad PopStatus message %r: %s", msg.data, exc)
                         elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSED):
                             break
+                    if self._running:
+                        _LOGGER.info(
+                            "PopStatus at %s closed the connection (code %s, %s); reconnecting",
+                            self.host, ws.close_code, ws.exception() or "no error",
+                        )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001
                 _LOGGER.debug("PopStatus connection failed (%s): %s", self.host, exc)
             finally:
                 self._ws = None
-                if self.data.connected:
-                    self.data.connected = False
-                    self._notify()
+                if self.data.connected and self._offline_timer is None and self._running:
+                    self._offline_timer = asyncio.get_running_loop().call_later(
+                        self.OFFLINE_GRACE, self._go_offline
+                    )
             if not self._running:
                 break
             if was_up:
+                # Dropped after being up: retry quickly, then back off as usual.
                 delay = self._reconnect_delay
+                await asyncio.sleep(1)
+                continue
             await asyncio.sleep(delay)
             delay = min(delay * 2, self._max_reconnect_delay)
 
