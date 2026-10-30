@@ -39,16 +39,17 @@ def _print_eta(self):
     """
     remaining = self.coordinator.data.time_remaining
     if remaining is None:
-        self._eta = None
+        self._eta_estimate = self._eta = None
         return None
-    eta = (dt_util.utcnow() + timedelta(seconds=remaining)).replace(
-        second=0, microsecond=0
-    )
-    previous = getattr(self, "_eta", None)
-    if previous is not None and abs(eta - previous) < timedelta(minutes=1):
-        return previous
-    self._eta = eta
-    return eta
+    estimate = dt_util.utcnow() + timedelta(seconds=remaining)
+    previous = getattr(self, "_eta_estimate", None)
+    # Compare unrounded estimates: rounded ones flip between two minutes
+    # when the estimate sits on a minute boundary.
+    if previous is not None and abs(estimate - previous) < timedelta(minutes=1):
+        return self._eta
+    self._eta_estimate = estimate
+    self._eta = estimate.replace(second=0, microsecond=0)
+    return self._eta
 
 
 @dataclass(frozen=True, kw_only=True)
