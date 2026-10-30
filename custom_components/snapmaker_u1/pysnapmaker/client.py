@@ -532,13 +532,13 @@ class SnapmakerClient:
             self._webcams = [
                 Webcam(
                     name=str(w.get("name") or f"Camera {i + 1}"),
+                    # Only the camera's own URLs: falling back to the default
+                    # /webcam/ paths would show the internal camera instead.
                     snapshot_url=(
-                        self.resolve_url(w["snapshot_url"]) if w.get("snapshot_url")
-                        else f"{self.base_url}{CAMERA_SNAPSHOT_PATH}"
+                        self.resolve_url(w["snapshot_url"]) if w.get("snapshot_url") else ""
                     ),
                     stream_url=(
-                        self.resolve_url(w["stream_url"]) if w.get("stream_url")
-                        else f"{self.base_url}{CAMERA_STREAM_PATH}"
+                        self.resolve_url(w["stream_url"]) if w.get("stream_url") else ""
                     ),
                     primary=i == 0,
                 )

@@ -134,13 +134,16 @@ class SnapmakerCamera(CoordinatorEntity[SnapmakerDataUpdateCoordinator], Camera)
 
     @property
     def _snapshot_url(self) -> str:
-        if self._webcam.primary or not self._webcam.snapshot_url:
+        """Snapshot URL; for a second camera only its own ("" if none)."""
+        if self._webcam.primary:
             return self._client.camera_snapshot_url
         return self._webcam.snapshot_url
 
     @property
     def _stream_url(self) -> str:
-        if self._webcam.primary or not self._webcam.stream_url:
+        """MJPEG stream URL; for a second camera only its own ("" if none,
+        e.g. mjpegstreamer-adaptive mode, which only has a snapshot URL)."""
+        if self._webcam.primary:
             return self._client.camera_stream_url
         return self._webcam.stream_url
 
@@ -164,7 +167,11 @@ class SnapmakerCamera(CoordinatorEntity[SnapmakerDataUpdateCoordinator], Camera)
                 ("stream", f"{base}/webcam/?action=stream"),
             ]
         else:  # e.g. a USB camera at /webcam2/: only its own URLs
-            candidates = [("snapshot", self._snapshot_url), ("stream", self._stream_url)]
+            candidates = [
+                (kind, url)
+                for kind, url in (("snapshot", self._snapshot_url), ("stream", self._stream_url))
+                if url
+            ]
         # Try whatever worked last time first, then the rest in order.
         if self._working_source in candidates:
             candidates.insert(0, self._working_source)
@@ -268,6 +275,9 @@ class SnapmakerCamera(CoordinatorEntity[SnapmakerDataUpdateCoordinator], Camera)
             raise web.HTTPServiceUnavailable(reason="Printer is offline")
         session = async_get_clientsession(self._hass)
         stream_url = self._stream_url
+        if not stream_url:
+            # No MJPEG stream for this camera: stream its snapshots instead
+            return await super().handle_async_mjpeg_stream(request)
         try:
             resp = await session.get(
                 stream_url,
