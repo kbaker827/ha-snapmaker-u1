@@ -15,6 +15,10 @@ ENDPOINT_SERVER_TEMPERATURE_STORE = "/server/temperature_store"
 ENDPOINT_FILES_LIST = "/server/files/list"
 ENDPOINT_PRINT_START = "/printer/print/start"
 ENDPOINT_WEBCAMS_LIST = "/server/webcams/list"
+# Optional Moonraker components (Extended Firmware)
+ENDPOINT_SPOOLMAN_SPOOL_ID = "/server/spoolman/spool_id"
+ENDPOINT_SPOOLMAN_STATUS = "/server/spoolman/status"
+ENDPOINT_TIMELAPSE_SETTINGS = "/machine/timelapse/settings"
 
 # HA event names fired on print-state transitions
 EVENT_PRINT_STARTED = "snapmaker_u1_print_started"
@@ -41,6 +45,15 @@ WS_NOTIFY_KLIPPY_SHUTDOWN = "notify_klippy_shutdown"
 WS_NOTIFY_KLIPPY_DISCONNECTED = "notify_klippy_disconnected"
 WS_NOTIFY_HISTORY_CHANGED = "notify_history_changed"
 WS_NOTIFY_FILELIST_CHANGED = "notify_filelist_changed"
+WS_NOTIFY_ACTIVE_SPOOL_SET = "notify_active_spool_set"
+WS_NOTIFY_SPOOLMAN_STATUS = "notify_spoolman_status_changed"
+WS_NOTIFY_TIMELAPSE_EVENT = "notify_timelapse_event"
+
+# Klipper object for skipping labelled objects mid-print
+EXCLUDE_OBJECT = "exclude_object"
+# Extended Firmware camera service RTSP ports (internal, USB camera)
+RTSP_PORT_INTERNAL = 8554
+RTSP_PORT_USB = 8555
 
 # Camera
 CAMERA_STREAM_PATH = "/webcam/stream.mjpg"

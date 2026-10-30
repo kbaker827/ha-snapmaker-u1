@@ -1,8 +1,9 @@
-"""Camera platform for the Snapmaker U1 integration (MJPEG webcam)."""
+"""Camera platform for the Snapmaker U1 integration (MJPEG / RTSP webcams)."""
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 import aiohttp
 from aiohttp import web
@@ -19,6 +20,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, MANUFACTURER, MODEL
 from .pysnapmaker.const import CAMERA_SNAPSHOT_PATH, CAMERA_STREAM_PATH
+from .pysnapmaker.models import Webcam
 from .coordinator import SnapmakerDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,9 +49,16 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Snapmaker U1 camera from a config entry."""
+    """Set up a camera entity for each of the printer's cameras."""
     coordinator: SnapmakerDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([SnapmakerCamera(hass, coordinator)])
+    webcams = coordinator.client.webcams if coordinator.client else []
+    if not webcams:
+        webcams = [Webcam("Webcam", "", "", primary=True)]
+    async_add_entities(SnapmakerCamera(hass, coordinator, cam) for cam in webcams)
+
+
+def _slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "camera"
 
 
 class SnapmakerCamera(CoordinatorEntity[SnapmakerDataUpdateCoordinator], Camera):
@@ -58,20 +67,22 @@ class SnapmakerCamera(CoordinatorEntity[SnapmakerDataUpdateCoordinator], Camera)
     Uses ``async_camera_image`` to fetch JPEG stills from the webcam
     discovered through Moonraker, falling back to common U1 camera paths and
     to grabbing a frame from the MJPEG stream.  The live view proxies the
-    MJPEG stream directly.  ``stream_source`` is intentionally not
-    implemented so that Home Assistant does not attempt HLS transcoding
-    (which requires ffmpeg and is often unnecessary for a printer cam).
+    MJPEG stream directly.
+
+    When the Extended Firmware's RTSP server is on, ``stream_source`` returns
+    the RTSP URL, so Home Assistant can play (and record) the H.264 stream
+    instead. Without it there is no ``stream_source``, so Home Assistant
+    doesn't try HLS transcoding of the MJPEG stream.
     """
 
     _attr_has_entity_name = True
-    _attr_name = "Webcam"
-    _attr_supported_features = CameraEntityFeature(0)
     _attr_frame_interval = CAMERA_FRAME_INTERVAL
 
     def __init__(
         self,
         hass: HomeAssistant,
         coordinator: SnapmakerDataUpdateCoordinator,
+        webcam: Webcam,
     ) -> None:
         # Follow the coordinator's availability (offline printer -> unavailable)
         CoordinatorEntity.__init__(self, coordinator)
@@ -79,7 +90,17 @@ class SnapmakerCamera(CoordinatorEntity[SnapmakerDataUpdateCoordinator], Camera)
         self._coordinator = coordinator
         self._hass = hass
         host = coordinator.entry.data["host"]
-        self._attr_unique_id = f"{host}_webcam"
+        self._webcam = webcam
+        if webcam.primary:
+            # Unchanged ID/name for the internal camera
+            self._attr_unique_id = f"{host}_webcam"
+            self._attr_name = "Webcam"
+        else:
+            self._attr_unique_id = f"{host}_webcam_{_slug(webcam.name)}"
+            self._attr_name = f"Webcam {webcam.name}"
+        self._attr_supported_features = (
+            CameraEntityFeature.STREAM if webcam.rtsp_url else CameraEntityFeature(0)
+        )
         self._client = coordinator.client
         # (kind, url) of the source that last returned an image
         self._working_source: tuple[str, str] | None = None
@@ -103,23 +124,47 @@ class SnapmakerCamera(CoordinatorEntity[SnapmakerDataUpdateCoordinator], Camera)
     def extra_state_attributes(self) -> dict[str, str]:
         if self._client is None:
             return {}
-        return {
-            "snapshot_url": self._client.camera_snapshot_url,
-            "stream_url": self._client.camera_stream_url,
+        attrs = {
+            "snapshot_url": self._snapshot_url,
+            "stream_url": self._stream_url,
         }
+        if self._webcam.rtsp_url:
+            attrs["rtsp_url"] = self._webcam.rtsp_url
+        return attrs
+
+    @property
+    def _snapshot_url(self) -> str:
+        if self._webcam.primary or not self._webcam.snapshot_url:
+            return self._client.camera_snapshot_url
+        return self._webcam.snapshot_url
+
+    @property
+    def _stream_url(self) -> str:
+        if self._webcam.primary or not self._webcam.stream_url:
+            return self._client.camera_stream_url
+        return self._webcam.stream_url
+
+    async def stream_source(self) -> str | None:
+        """RTSP stream (Extended Firmware), so HA can play/record H.264."""
+        if not self.available:
+            return None
+        return self._webcam.rtsp_url
 
     def _snapshot_candidates(self) -> list[tuple[str, str]]:
         """Ordered (kind, url) pairs to try when fetching a still image."""
         client = self._client
         base = client.base_url
-        candidates = [
-            ("snapshot", client.camera_snapshot_url),
-            ("snapshot", f"{base}{CAMERA_SNAPSHOT_PATH}"),
-            ("snapshot", f"{base}/webcam/?action=snapshot"),
-            ("stream", client.camera_stream_url),
-            ("stream", f"{base}{CAMERA_STREAM_PATH}"),
-            ("stream", f"{base}/webcam/?action=stream"),
-        ]
+        if self._webcam.primary:
+            candidates = [
+                ("snapshot", self._snapshot_url),
+                ("snapshot", f"{base}{CAMERA_SNAPSHOT_PATH}"),
+                ("snapshot", f"{base}/webcam/?action=snapshot"),
+                ("stream", self._stream_url),
+                ("stream", f"{base}{CAMERA_STREAM_PATH}"),
+                ("stream", f"{base}/webcam/?action=stream"),
+            ]
+        else:  # e.g. a USB camera at /webcam2/: only its own URLs
+            candidates = [("snapshot", self._snapshot_url), ("stream", self._stream_url)]
         # Try whatever worked last time first, then the rest in order.
         if self._working_source in candidates:
             candidates.insert(0, self._working_source)
@@ -222,7 +267,7 @@ class SnapmakerCamera(CoordinatorEntity[SnapmakerDataUpdateCoordinator], Camera)
         if not self.available or self._client is None:
             raise web.HTTPServiceUnavailable(reason="Printer is offline")
         session = async_get_clientsession(self._hass)
-        stream_url = self._client.camera_stream_url
+        stream_url = self._stream_url
         try:
             resp = await session.get(
                 stream_url,

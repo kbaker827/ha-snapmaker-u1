@@ -90,3 +90,24 @@ start_print:
       example: "benchy.gcode"
       selector:
         text:
+
+exclude_object:
+  name: Exclude object
+  description: >
+    Stop printing one labelled object of the running print (EXCLUDE_OBJECT).
+    Needs object labels from the slicer. Can't be undone for this print.
+  fields:
+    config_entry_id:
+      name: Config Entry
+      description: The config entry ID for the printer.
+      required: true
+      selector:
+        config_entry:
+          integration: snapmaker_u1
+    name:
+      name: Object name
+      description: The object's name, as listed in the Current Object sensor's "objects" attribute.
+      required: true
+      example: "PART_1.STL_ID_0_COPY_0"
+      selector:
+        text:

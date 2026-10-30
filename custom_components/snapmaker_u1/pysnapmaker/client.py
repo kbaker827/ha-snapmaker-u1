@@ -7,7 +7,7 @@ import logging
 import re
 import time
 from typing import Any, Callable, Optional
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 import aiohttp
 
@@ -26,19 +26,28 @@ from .const import (
     ENDPOINT_PRINTER_OBJECTS_QUERY,
     ENDPOINT_PRINTER_RESTART,
     ENDPOINT_SERVER_INFO,
+    ENDPOINT_SPOOLMAN_SPOOL_ID,
+    ENDPOINT_SPOOLMAN_STATUS,
+    ENDPOINT_TIMELAPSE_SETTINGS,
     ENDPOINT_WEBCAMS_LIST,
+    EXCLUDE_OBJECT,
     KLIPPER_READY,
     KLIPPER_SHUTDOWN,
     PRINTER_OBJECTS,
     PURIFIER_OBJECT,
+    RTSP_PORT_INTERNAL,
+    RTSP_PORT_USB,
     WS_ENDPOINT,
     WS_METHOD_SUBSCRIBE,
+    WS_NOTIFY_ACTIVE_SPOOL_SET,
     WS_NOTIFY_FILELIST_CHANGED,
     WS_NOTIFY_HISTORY_CHANGED,
     WS_NOTIFY_KLIPPY_DISCONNECTED,
     WS_NOTIFY_KLIPPY_READY,
     WS_NOTIFY_KLIPPY_SHUTDOWN,
+    WS_NOTIFY_SPOOLMAN_STATUS,
     WS_NOTIFY_STATUS_UPDATE,
+    WS_NOTIFY_TIMELAPSE_EVENT,
 )
 from .models import (
     ChamberHeaterData,
@@ -52,7 +61,9 @@ from .models import (
     PrintStats,
     SnapmakerPrinterData,
     Toolhead,
+    ExcludeObjectData,
     TopCoverData,
+    Webcam,
     VirtualSdCard,
 )
 
@@ -156,6 +167,12 @@ class SnapmakerClient:
         self._camera_stream_url: str | None = None
         self._camera_snapshot_url: str | None = None
         self._webcam_info: dict[str, Any] | None = None
+        self._webcams: list[Webcam] = []
+        # Remote screen page (Extended Firmware), if the printer offers one
+        self._screen_url: str | None = None
+        # Optional Moonraker components (e.g. "spoolman", "timelapse")
+        self._components: set[str] = set()
+        self._has_exclude_object = False
 
         # Reconnection backoff
         self._reconnect_delay = 5
@@ -187,6 +204,37 @@ class SnapmakerClient:
     @property
     def camera_snapshot_url(self) -> str:
         return self._camera_snapshot_url or f"{self.base_url}{CAMERA_SNAPSHOT_PATH}"
+
+    @property
+    def webcams(self) -> list[Webcam]:
+        """Every camera the printer lists; the first is the internal one."""
+        if self._webcams:
+            return list(self._webcams)
+        return [
+            Webcam(
+                name="Webcam",
+                snapshot_url=self.camera_snapshot_url,
+                stream_url=self.camera_stream_url,
+                primary=True,
+            )
+        ]
+
+    @property
+    def screen_url(self) -> str | None:
+        """Remote screen page (Extended Firmware), if enabled on the printer."""
+        return self._screen_url
+
+    @property
+    def has_spoolman(self) -> bool:
+        return "spoolman" in self._components
+
+    @property
+    def has_timelapse(self) -> bool:
+        return "timelapse" in self._components
+
+    @property
+    def has_exclude_object(self) -> bool:
+        return self._has_exclude_object
 
     @property
     def webcam_info(self) -> dict[str, Any] | None:
@@ -269,10 +317,12 @@ class SnapmakerClient:
             self._session = aiohttp.ClientSession()
         try:
             await self._fetch_printer_info()
+            await self._fetch_components()
             await self._discover_dynamic_objects()
             await self._discover_webcams()
             await self._fetch_printer_state()
             await self.fetch_file_list()
+            await self._fetch_component_state()
             self._top_cover_at_setup = bool(
                 self._data.top_cover and self._data.top_cover.detected
             )
@@ -329,6 +379,9 @@ class SnapmakerClient:
             ]
             self._has_filament_config = FILAMENT_CONFIG_OBJECT in objects
             self._has_purifier = PURIFIER_OBJECT in objects
+            self._has_exclude_object = EXCLUDE_OBJECT in objects
+            if self._has_exclude_object and self._data.exclude_object is None:
+                self._data.exclude_object = ExcludeObjectData()
             if self._has_purifier and self._data.top_cover is None:
                 self._data.top_cover = TopCoverData()
             self._entity_objects = self._entity_objects_from(objects)
@@ -357,6 +410,7 @@ class SnapmakerClient:
             or _RE_CHAMBER_FILTER.match(o)
             or o == FILAMENT_CONFIG_OBJECT
             or o == PURIFIER_OBJECT
+            or o == EXCLUDE_OBJECT
         )
 
     def register_disconnect_callback(self, callback: Callable) -> None:
@@ -442,12 +496,13 @@ class SnapmakerClient:
             _LOGGER.debug("Could not read chamber heater limits: %s", exc)
 
     async def _discover_webcams(self) -> None:
-        """Query /server/webcams/list and use the first real camera's URLs.
+        """Query /server/webcams/list for the printer's cameras.
 
-        Extended U1 firmware with the remote-screen add-on registers its own
-        touchscreen mirror as a webcam (``[webcam gui]`` in Moonraker config,
-        typically named "gui"). That entry can be returned before the real
-        camera, so it gets excluded here rather than picked as the stream.
+        Every real camera becomes a camera entity; the first is the internal
+        one. Extended U1 firmware with the remote-screen add-on registers its
+        own touchscreen mirror as a webcam (``[webcam gui]`` in Moonraker
+        config, typically named "gui"). That's not a camera: it's offered as
+        the remote screen page instead.
         """
         try:
             data = await self._get(ENDPOINT_WEBCAMS_LIST)
@@ -456,15 +511,15 @@ class SnapmakerClient:
             if not enabled:
                 _LOGGER.debug("No enabled webcams found via /server/webcams/list")
                 return
-            real_cameras = [
-                w
-                for w in enabled
-                if not any(
-                    token in f"{w.get('name', '')} {w.get('location', '')}".lower()
-                    for token in _SCREEN_MIRROR_WEBCAM_TOKENS
-                )
-            ]
-            cam = (real_cameras or enabled)[0]
+            real_cameras = []
+            for w in enabled:
+                label = f"{w.get('name', '')} {w.get('location', '')}".lower()
+                if any(token in label for token in _SCREEN_MIRROR_WEBCAM_TOKENS):
+                    self._screen_url = f"{self.base_url}/screen/"
+                else:
+                    real_cameras.append(w)
+            cameras = real_cameras or enabled
+            cam = cameras[0]
             self._webcam_info = cam
             stream_url: str = cam.get("stream_url", "")
             snapshot_url: str = cam.get("snapshot_url", "")
@@ -474,14 +529,99 @@ class SnapmakerClient:
                 self._camera_stream_url = self.resolve_url(stream_url)
             if snapshot_url:
                 self._camera_snapshot_url = self.resolve_url(snapshot_url)
+            self._webcams = [
+                Webcam(
+                    name=str(w.get("name") or f"Camera {i + 1}"),
+                    snapshot_url=(
+                        self.resolve_url(w["snapshot_url"]) if w.get("snapshot_url")
+                        else f"{self.base_url}{CAMERA_SNAPSHOT_PATH}"
+                    ),
+                    stream_url=(
+                        self.resolve_url(w["stream_url"]) if w.get("stream_url")
+                        else f"{self.base_url}{CAMERA_STREAM_PATH}"
+                    ),
+                    primary=i == 0,
+                )
+                for i, w in enumerate(cameras)
+            ]
+            await self._discover_rtsp()
             _LOGGER.debug(
-                "Discovered webcam '%s': stream=%s snapshot=%s",
-                cam.get("name", "unknown"),
-                self._camera_stream_url,
-                self._camera_snapshot_url,
+                "Discovered webcams: %s (remote screen: %s)",
+                [(w.name, w.snapshot_url, w.stream_url, w.rtsp_url) for w in self._webcams],
+                self._screen_url,
             )
         except Exception as exc:
             _LOGGER.debug("Could not discover webcams: %s", exc)
+
+    async def _discover_rtsp(self) -> None:
+        """Find the Extended Firmware's RTSP streams (off by default).
+
+        Its camera service serves the internal camera on port 8554 and a USB
+        camera (``/webcam2/``) on 8555 when RTSP is enabled in Firmware Config.
+        """
+        for cam in self._webcams:
+            usb = "/webcam2" in f"{cam.snapshot_url} {cam.stream_url}"
+            if not usb and not cam.primary:
+                continue
+            port = RTSP_PORT_USB if usb else RTSP_PORT_INTERNAL
+            if await self._port_open(port):
+                cam.rtsp_url = f"rtsp://{self.host}:{port}/stream"
+
+    async def _port_open(self, port: int, timeout: float = 2) -> bool:
+        try:
+            _reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, port), timeout
+            )
+        except (OSError, asyncio.TimeoutError):
+            return False
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except OSError:
+            pass
+        return True
+
+    async def _fetch_components(self) -> None:
+        """Note which optional Moonraker components are loaded."""
+        try:
+            data = await self._get(ENDPOINT_SERVER_INFO)
+            self._components = set(data.get("result", {}).get("components", []))
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("Could not read Moonraker components: %s", exc)
+
+    async def _fetch_component_state(self) -> None:
+        """Spoolman active spool and timelapse settings, if available."""
+        if self.has_spoolman:
+            try:
+                data = await self._get(ENDPOINT_SPOOLMAN_SPOOL_ID)
+                self._data.active_spool_id = data.get("result", {}).get("spool_id") or None
+                status = await self._get(ENDPOINT_SPOOLMAN_STATUS)
+                connected = status.get("result", {}).get("spoolman_connected")
+                if connected is not None:
+                    self._data.spoolman_connected = bool(connected)
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.debug("Could not read the Spoolman state: %s", exc)
+        if self.has_timelapse:
+            try:
+                data = await self._get(ENDPOINT_TIMELAPSE_SETTINGS)
+                enabled = data.get("result", {}).get("enabled")
+                if enabled is not None:
+                    self._data.timelapse_enabled = bool(enabled)
+                files = await self._get(ENDPOINT_FILES_LIST, params={"root": "timelapse"})
+                videos = [
+                    f for f in files.get("result", [])
+                    if isinstance(f, dict)
+                    and str(f.get("path") or f.get("filename") or "").endswith((".mp4", ".mkv"))
+                ]
+                if videos:
+                    newest = max(videos, key=lambda f: f.get("modified") or 0)
+                    self._data.last_timelapse = newest.get("path") or newest.get("filename")
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.debug("Could not read the timelapse state: %s", exc)
+
+    def timelapse_url(self, filename: str) -> str:
+        """Download URL of a file in Moonraker's "timelapse" root."""
+        return f"{self.base_url}/server/files/timelapse/{quote(filename)}"
 
     def _object_fields(self) -> dict[str, list[str] | None]:
         """Objects to subscribe/query, with the fields wanted (None = all)."""
@@ -499,6 +639,7 @@ class SnapmakerClient:
             + self._chamber_heater_keys
             + self._chamber_filter_keys
             + ([PURIFIER_OBJECT] if self._has_purifier else [])
+            + ([EXCLUDE_OBJECT] if self._has_exclude_object else [])
         )
 
     # ------------------------------------------------------------------
@@ -556,6 +697,7 @@ class SnapmakerClient:
                 # refresh state and pick up objects that weren't there before.
                 await self._check_objects_changed()
                 await self.fetch_file_list()
+                await self._fetch_component_state()
             self._ws_connected_once = True
 
             async for msg in ws:
@@ -628,6 +770,27 @@ class SnapmakerClient:
         elif method == WS_NOTIFY_FILELIST_CHANGED:
             # A file was uploaded, deleted or moved on the printer
             if await self._apply_file_list_change(params):
+                await self._notify_callbacks()
+
+        elif method == WS_NOTIFY_ACTIVE_SPOOL_SET:
+            info = params[0] if params and isinstance(params[0], dict) else {}
+            self._data.active_spool_id = info.get("spool_id") or None
+            await self._notify_callbacks()
+
+        elif method == WS_NOTIFY_SPOOLMAN_STATUS:
+            info = params[0] if params and isinstance(params[0], dict) else {}
+            if "spoolman_connected" in info:
+                self._data.spoolman_connected = bool(info["spoolman_connected"])
+                await self._notify_callbacks()
+
+        elif method == WS_NOTIFY_TIMELAPSE_EVENT:
+            info = params[0] if params and isinstance(params[0], dict) else {}
+            if (
+                info.get("action") == "render"
+                and info.get("status") == "success"
+                and info.get("filename")
+            ):
+                self._data.last_timelapse = str(info["filename"])
                 await self._notify_callbacks()
 
         elif method == WS_NOTIFY_HISTORY_CHANGED:
@@ -802,6 +965,19 @@ class SnapmakerClient:
             if key in status and "value" in status[key]:
                 self._data.chamber_filters[key] = (status[key]["value"] or 0) > 0
                 changed = True
+
+        if EXCLUDE_OBJECT in status and self._data.exclude_object is not None:
+            eo = status[EXCLUDE_OBJECT]
+            target = self._data.exclude_object
+            if isinstance(eo.get("objects"), list):
+                target.objects = [
+                    str(o.get("name")) for o in eo["objects"] if isinstance(o, dict) and o.get("name")
+                ]
+            if isinstance(eo.get("excluded_objects"), list):
+                target.excluded = [str(o) for o in eo["excluded_objects"]]
+            if "current_object" in eo:
+                target.current = eo["current_object"] or None
+            changed = True
 
         if PURIFIER_OBJECT in status and self._data.top_cover is not None:
             self._update_top_cover(status[PURIFIER_OBJECT])
@@ -1201,6 +1377,31 @@ class SnapmakerClient:
     async def reset_top_cover_filter(self) -> None:
         """Reset the filter usage counter after fitting a new filter."""
         await self.execute_gcode("SET_PURIFIER FAN=inner WORK=0")
+
+    async def exclude_object(self, name: str) -> None:
+        """Stop printing one labelled object of the current print."""
+        objects = self._data.exclude_object
+        if objects is None or name not in objects.objects:
+            raise ValueError(f"No object named {name!r} in the current print")
+        if any(ch.isspace() for ch in name):
+            raise ValueError(f"Object name {name!r} contains spaces")
+        await self.execute_gcode(f"EXCLUDE_OBJECT NAME={name}")
+
+    async def set_active_spool(self, spool_id: int | None) -> None:
+        """Set (or with None/0 clear) Moonraker's active Spoolman spool."""
+        body = {"spool_id": int(spool_id)} if spool_id else {}
+        await self._post(ENDPOINT_SPOOLMAN_SPOOL_ID, body)
+        self._data.active_spool_id = int(spool_id) if spool_id else None
+        await self._notify_callbacks()
+
+    async def set_timelapse_enabled(self, enabled: bool) -> None:
+        """Turn the Moonraker timelapse plugin on or off."""
+        data = await self._post(ENDPOINT_TIMELAPSE_SETTINGS, {"enabled": enabled})
+        result = data.get("result") if isinstance(data, dict) else None
+        self._data.timelapse_enabled = (
+            bool(result["enabled"]) if isinstance(result, dict) and "enabled" in result else enabled
+        )
+        await self._notify_callbacks()
 
     async def set_active_tool(self, tool_index: int) -> None:
         """Switch the active extruder tool (T0–T3)."""

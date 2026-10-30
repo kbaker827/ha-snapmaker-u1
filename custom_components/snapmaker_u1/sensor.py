@@ -18,7 +18,9 @@ from .coordinator import SnapmakerDataUpdateCoordinator
 from .definitions import (
     CHAMBER_SENSOR_TEMPLATE,
     EXTRUDER_SENSORS,
+    EXCLUDE_OBJECT_SENSOR,
     PRINTER_SENSORS,
+    TIMELAPSE_SENSOR,
     TOP_COVER_SENSORS,
     SnapmakerSensorEntityDescription,
     chamber_label,
@@ -126,6 +128,12 @@ async def async_setup_entry(
     # Official Top Cover (air purifier)
     if coordinator.client and coordinator.client.has_top_cover:
         entities.extend(SnapmakerSensor(coordinator, d) for d in TOP_COVER_SENSORS)
+
+    # Klipper exclude_object and the Moonraker timelapse plugin
+    if coordinator.client and coordinator.client.has_exclude_object:
+        entities.append(SnapmakerSensor(coordinator, EXCLUDE_OBJECT_SENSOR))
+    if coordinator.client and coordinator.client.has_timelapse:
+        entities.append(SnapmakerSensor(coordinator, TIMELAPSE_SENSOR))
 
     async_add_entities(entities)
 

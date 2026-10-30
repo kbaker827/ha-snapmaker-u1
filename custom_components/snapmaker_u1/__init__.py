@@ -66,6 +66,7 @@ SERVICE_EXECUTE_GCODE = "execute_gcode"
 SERVICE_SET_BED_TEMPERATURE = "set_bed_temperature"
 SERVICE_SET_NOZZLE_TEMPERATURE = "set_nozzle_temperature"
 SERVICE_START_PRINT = "start_print"
+SERVICE_EXCLUDE_OBJECT = "exclude_object"
 
 # Service schemas
 EXECUTE_GCODE_SCHEMA = vol.Schema(
@@ -97,6 +98,12 @@ START_PRINT_SCHEMA = vol.Schema(
     {
         vol.Required("config_entry_id"): cv.string,
         vol.Required("filename"): cv.string,
+    }
+)
+EXCLUDE_OBJECT_SCHEMA = vol.Schema(
+    {
+        vol.Required("config_entry_id"): cv.string,
+        vol.Required("name"): cv.string,
     }
 )
 
@@ -149,6 +156,16 @@ def _register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(
         DOMAIN, SERVICE_START_PRINT, handle_start_print, START_PRINT_SCHEMA
+    )
+
+    async def handle_exclude_object(call: ServiceCall) -> None:
+        try:
+            await _get_client(hass, call).exclude_object(call.data["name"])
+        except ValueError as exc:
+            raise ServiceValidationError(str(exc)) from exc
+
+    hass.services.async_register(
+        DOMAIN, SERVICE_EXCLUDE_OBJECT, handle_exclude_object, EXCLUDE_OBJECT_SCHEMA
     )
 
 
@@ -277,6 +294,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_SET_BED_TEMPERATURE,
             SERVICE_SET_NOZZLE_TEMPERATURE,
             SERVICE_START_PRINT,
+            SERVICE_EXCLUDE_OBJECT,
         ):
             hass.services.async_remove(DOMAIN, svc)
 

@@ -6,6 +6,7 @@ Provides:
   - TopCoverModeSelect – official Top Cover purifier mode (cooling / keep warm)
   - PopStatusLightModeSelect – BIQU PopStatus Simple / Advanced light mode
   - PopKnomiSettingSelect – BIQU PopKnomi progress / error / screen-off settings
+  - ExcludeObjectSelect – skip one labelled object of the running print
 """
 from __future__ import annotations
 
@@ -76,6 +77,9 @@ async def async_setup_entry(
 
     if coordinator.client and coordinator.client.has_top_cover:
         entities.append(TopCoverModeSelect(coordinator))
+
+    if coordinator.client and coordinator.client.has_exclude_object:
+        entities.append(ExcludeObjectSelect(coordinator))
 
     async_add_entities(entities)
 
@@ -292,3 +296,48 @@ class PopKnomiSettingSelect(PopStatusEntity, SelectEntity):
             await self._setter(value)
         except ConnectionError as exc:
             raise HomeAssistantError(str(exc)) from exc
+
+
+class ExcludeObjectSelect(SnapmakerBaseEntity, SelectEntity):
+    """Choose an object of the running print to stop printing (EXCLUDE_OBJECT).
+
+    Lists the objects that are still being printed; picking one excludes it
+    straight away, which can't be undone for this print.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "exclude_object"
+    _attr_icon = "mdi:cube-off-outline"
+
+    def __init__(self, coordinator: SnapmakerDataUpdateCoordinator) -> None:
+        super().__init__(coordinator)
+        host = coordinator.entry.data["host"]
+        self._attr_unique_id = f"{host}_exclude_object"
+
+    @property
+    def options(self) -> list[str]:
+        data = self.coordinator.data
+        return data.exclude_object.remaining if data and data.exclude_object else []
+
+    @property
+    def current_option(self) -> str | None:
+        return None  # an action, not a setting
+
+    @property
+    def available(self) -> bool:
+        data = self.coordinator.data
+        return bool(
+            super().available
+            and data
+            and (data.is_printing or data.is_paused)
+            and self.options
+        )
+
+    async def async_select_option(self, option: str) -> None:
+        client = self.coordinator.client
+        if client is None:
+            raise HomeAssistantError("Printer not connected")
+        try:
+            await client.exclude_object(option)
+        except ValueError as exc:
+            raise ServiceValidationError(str(exc)) from exc
