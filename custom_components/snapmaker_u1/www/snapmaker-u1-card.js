@@ -7,7 +7,7 @@
  * temperatures and print controls for one printer.
  */
 
-const CARD_VERSION = "1.14.1";
+const CARD_VERSION = "1.14.2";
 const DOMAIN = "snapmaker_u1";
 
 const ACCENTS = {
