@@ -53,6 +53,8 @@ class PopStatusLight(PopStatusEntity, LightEntity):
         return {
             "light_mode": POPSTATUS_LIGHT_MODES.get(data.light_mode),
             "printer_connected": data.printer_linked,
+            # Its own web page, for effects and colours per printer state
+            "web_ui": f"http://{self.popstatus.host}",
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
