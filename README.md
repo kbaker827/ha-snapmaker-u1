@@ -404,6 +404,45 @@ Notes:
 - To change its address or printer, use **⋮ → Reconfigure** on its entry. To
   remove it, delete the entry.
 
+Example automation: switch the light bar on when a print starts, and off
+30 minutes after it ends (finished, cancelled or failed). `mode: restart`
+means a new print that starts within those 30 minutes keeps it on.
+
+```yaml
+automation:
+  - alias: "PopStatus on while printing"
+    mode: restart
+    trigger:
+      - platform: event
+        event_type: snapmaker_u1_print_started
+        id: started
+      - platform: event
+        event_type:
+          - snapmaker_u1_print_complete
+          - snapmaker_u1_print_cancelled
+          - snapmaker_u1_print_failed
+        id: ended
+    action:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: started
+            sequence:
+              - service: light.turn_on
+                target:
+                  entity_id: light.popstatus_light
+                data:
+                  brightness_pct: 100
+          - conditions:
+              - condition: trigger
+                id: ended
+            sequence:
+              - delay: "00:30:00"
+              - service: light.turn_off
+                target:
+                  entity_id: light.popstatus_light
+```
+
 ---
 
 ## BIQU PopKnomi status display
@@ -430,8 +469,27 @@ Notes:
   first. GIFs and colours are managed there too.
 - Like the PopStatus, it works independently of the printer and uses the same
   local WebSocket as its web page (tested against its firmware 01.00.00.01).
-- Example: turn the screen off at night with an automation that selects
-  **On standby** at 22:00 and **Never** at 07:00.
+
+Example automation: let the screen turn off on standby at night (22:00), and
+keep it on during the day (from 07:00).
+
+```yaml
+automation:
+  - alias: "PopKnomi screen off at night"
+    trigger:
+      - platform: time
+        at: "22:00:00"
+        id: night
+      - platform: time
+        at: "07:00:00"
+        id: morning
+    action:
+      - service: select.select_option
+        target:
+          entity_id: select.popknomi_screen_off
+        data:
+          option: "{{ 'standby' if trigger.id == 'night' else 'never' }}"
+```
 
 ---
 
