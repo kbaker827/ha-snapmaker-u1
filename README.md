@@ -55,8 +55,8 @@ No Snapmaker account or cloud connection is required. The integration does
 | Print State | `standby` / `printing` / `paused` / `complete` / `error` / `cancelled` |
 | Print Progress | Percentage complete |
 | Current Layer / Total Layers | Layer counter for the current print |
-| Print Duration | Active printing time (excludes pauses) |
-| Total Duration | Time since the print started (includes pauses) |
+| Print Duration | Active printing time (excludes pauses; updated every 10 s) |
+| Total Duration | Time since the print started (includes pauses; updated every 10 s) |
 | Time Remaining | Estimated time left (updated every 10 s) |
 | Print ETA | Estimated finish time, to the minute (timestamp) |
 | Filament Used | Millimetres of filament consumed |
@@ -66,7 +66,7 @@ No Snapmaker account or cloud connection is required. The integration does
 | T0–T3 Filament | Loaded filament, e.g. `PLA Basic`, or `Empty`. Colour, vendor and more as attributes ([details](#filament-type-and-colour)) |
 | Chamber / extra temperature sensors | Every Klipper `temperature_sensor` (e.g. chamber, MCU) |
 | Panda Breath Temperature | Chamber heater temperature, if present ([details](#panda-breath--dragonbreath-chamber-heater)) |
-| Top Cover Filter Used / Filter Life | Filter hours used and % life left, if the official Top Cover is fitted ([details](#official-top-cover)) |
+| Top Cover Filter Used / Filter Life / Circulation Fan RPM | Filter hours used, % life left and fan speed, if the official Top Cover is fitted ([details](#official-top-cover)) |
 | Part Cooling Fan | Fan speed in % |
 | Print Speed / Flow Rate | Current speed and flow overrides in % |
 | Klipper State | `ready` / `startup` / `shutdown` / `error` |
@@ -80,6 +80,7 @@ No Snapmaker account or cloud connection is required. The integration does
 | Paused | On while a print is paused |
 | Error | On when a Klipper/print error is active (message in attributes) |
 | Filament runout | One per filament sensor (the U1's `filament_motion_sensor e0…e3` and any `filament_switch_sensor`); on when filament is **not** detected |
+| Printer connection (PopStatus / PopKnomi) | On while a BIQU accessory is connected to the printer ([PopStatus](#biqu-popstatus-light-bar), [PopKnomi](#biqu-popknomi-status-display)) |
 
 ### Buttons
 | Button | Action |
@@ -91,7 +92,7 @@ No Snapmaker account or cloud connection is required. The integration does
 | Restart Klipper | Restarts the Klipper process |
 | Reset Top Cover Filter | Resets the filter counter after fitting a new filter (Top Cover only) |
 
-### Controls (numbers, selects, switches)
+### Controls (numbers, selects, switches, lights)
 | Entity | Description |
 |---|---|
 | Bed Target Temperature | Set the bed temperature (0–120 °C) |
@@ -104,6 +105,8 @@ No Snapmaker account or cloud connection is required. The integration does
 | Work Light | The cavity light (reads its real state from the printer) |
 | DragonBreath Filter | Chamber filter fan, if present |
 | Top Cover Mode / Exhaust Fan / Circulation Fan | Official Top Cover purifier mode and fans, if fitted ([details](#official-top-cover)) |
+| PopStatus Light / Light mode | BIQU PopStatus light bar on/off, brightness and Simple/Advanced mode ([details](#biqu-popstatus-light-bar)) |
+| PopKnomi Print progress display / Error display / Screen off | BIQU PopKnomi screen settings ([details](#biqu-popknomi-status-display)) |
 
 ### Starting a print
 The **Print File** select lists the G-code files on the printer, newest
@@ -150,8 +153,9 @@ All services take the printer's `config_entry_id`.
 
 ### Diagnostics
 **Settings → Devices & Services → Snapmaker U1 → ⋮ → Download diagnostics**
-gives you the printer state, connection status and camera URLs. Your API key
-is redacted automatically.
+gives you the printer state, connection status, camera URLs and Top Cover
+state. Your API key is redacted automatically. A PopStatus or PopKnomi entry
+has its own diagnostics with its address and last reported settings.
 
 ---
 
@@ -276,8 +280,9 @@ On the dashboard card it appears as a **Panda Breath** temperature tile (tap
 to set the target) and a **Filter** button.
 
 Notes:
-- Restart Home Assistant (or reload the integration) after enabling the heater
-  on the printer, so the new Klipper objects are discovered.
+- After you enable the heater on the printer, the integration picks it up by
+  itself once Klipper restarts (it reloads when new Klipper objects appear).
+  If it doesn't show up, reload the integration.
 - Any Klipper `heater_generic` is treated as a chamber heater, and any
   `output_pin` with "filter" or "breath" in its name as a filter switch.
 - With **stock** U1 firmware the Panda Breath isn't visible to the printer.
@@ -443,17 +448,24 @@ Notes:
 
 1. Go to **Settings → Devices & Services → Add Integration**
 2. Search for **Snapmaker U1**
-3. Enter:
+3. Choose what to add:
+   - **Snapmaker U1 printer**
+   - **BIQU PopStatus light bar** ([details](#biqu-popstatus-light-bar))
+   - **BIQU PopKnomi status display** ([details](#biqu-popknomi-status-display))
+4. For a printer, enter:
    - **IP Address**: the local IP of your printer (e.g. `192.168.1.42`)
    - **Port**: `80` by default (Moonraker is proxied through nginx)
    - **API Key**: leave blank unless you have configured Moonraker authentication
 
 The integration tests the connection before saving. If it succeeds, all
-entities are created immediately.
+entities are created immediately. Add the printer first, so a PopStatus or
+PopKnomi can be linked to it. Run **Add Integration** again for each extra
+printer or accessory.
 
-- **Changed the printer's IP?** Use **⋮ → Reconfigure** on the integration.
-- **Polling interval**: **Configure** sets how often state is refreshed while
-  the WebSocket is unavailable.
+- **Changed an IP address?** Use **⋮ → Reconfigure** on that printer's (or
+  accessory's) entry.
+- **Polling interval**: **Configure** on a printer entry sets how often state is
+  refreshed while the WebSocket is unavailable.
 - **Temperature unit**: **Configure → Temperature unit** picks the unit for
   every printer temperature (sensors, setpoints, the dashboard card and its
   presets). It defaults to **°C**, the usual unit for 3D printing, even if
@@ -515,9 +527,11 @@ automation:
 | Dashboard card not in the card picker / "Custom element doesn't exist" | Update to 1.10.0 or later, **restart Home Assistant**, then hard-refresh the browser (Ctrl+Shift+R); in the mobile app, use **Reset frontend cache** in the Companion app settings. The integration adds `/snapmaker_u1_static/snapmaker-u1-card.js` to Settings → Dashboards → ⋮ → **Resources** for you (and updates an entry you added by hand). Add the card to a dashboard you created (Settings → Dashboards); newer Home Assistant versions generate the default *Overview* automatically. YAML-mode dashboards: add that URL under `lovelace: resources:` as a `module` |
 | Card shows no nozzle tiles | Update to 1.7.2 or later |
 | Print File shows "Unavailable" | Update to 1.7.1 or later (older versions misread the printer's file list). It's also unavailable while the printer isn't ready or has no files in its storage |
-| PopStatus / PopKnomi entities `unavailable` | Check the light bar is powered and its address is still right: open `http://<address>` in a browser, and fix it with ⋮ → Reconfigure on its entry if needed. Give it a fixed IP in your router so it doesn't change |
+| PopStatus / PopKnomi entities `unavailable` | Check the device is powered and its address is still right: open `http://<address>` in a browser, and fix it with ⋮ → Reconfigure on its entry if needed. Give it a fixed IP in your router so it doesn't change |
 | Top Cover entities missing | Plug the cover in and update the printer to firmware 1.3.0 or later. The entities appear by themselves once the printer detects the cover |
 | Panda Breath entities missing | Enable it in the printer's Firmware Config page first (Extended Firmware only), then reload the integration |
+| PopStatus / PopKnomi not in the Add Integration menu | Update to 1.12.0 (PopStatus) or 1.13.0 (PopKnomi) or later and restart Home Assistant |
+| Sensors fill up the recorder / database | Update to 1.13.1 or later: time sensors update at most every 10 s, the ETA once a minute, and Toolhead Position is off by default. To keep a sensor out of history entirely, exclude it in the [`recorder`](https://www.home-assistant.io/integrations/recorder/) settings |
 | Temperatures show 0 after startup | Klipper may still be initialising; values update within seconds once it's ready |
 
 ---
@@ -539,6 +553,12 @@ automation:
   details (files and folders); a full re-fetch only happens for a
   `root_update`, at most once a minute
 - **Startup**: if the printer is unreachable, setup is retried automatically
+- **BIQU accessories**: the PopStatus and PopKnomi are separate config entries
+  (linked to a printer) that talk to each device's own local WebSocket
+  (`ws://<device>/ws`), the same one its web page uses; they work whether or
+  not the printer is on
+- **Top Cover**: read from the stock firmware's Klipper `purifier` object;
+  controlled with `SET_PURIFIER_MODE` / `SET_PURIFIER`
 - **HA version**: Home Assistant 2024.1+
 - **Icon**: shipped in `custom_components/snapmaker_u1/brand/` (light and dark,
   256 px and 512 px), which Home Assistant 2026.3+ uses automatically. Older
@@ -553,6 +573,10 @@ by Greg Hesp and Adrian Garside. Dashboard card styled after
 [Printer Tools](https://github.com/62fixolab/Printer-Tools-App) by FixoLab.
 Panda Breath support builds on the
 [U1 Extended Firmware](https://github.com/paxx12-snapmaker-u1/SnapmakerU1-Extended-Firmware)
-by paxx12.
+by paxx12. Top Cover support follows Snapmaker's
+[u1-klipper](https://github.com/Snapmaker/u1-klipper) purifier module, and the
+PopStatus and PopKnomi protocols come from the web UIs in BIQU's published
+firmware ([PopStatus](https://github.com/bigtreetech/PopStatus),
+[PopKnomi](https://github.com/bigtreetech/PopKnomi)).
 
 Moonraker API documentation: https://moonraker.readthedocs.io
