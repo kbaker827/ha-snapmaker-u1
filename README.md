@@ -407,6 +407,9 @@ Notes:
 Example automation: switch the light bar on when a print starts, and off
 30 minutes after it ends (finished, cancelled or failed). `mode: restart`
 means a new print that starts within those 30 minutes keeps it on.
+Replace `YOUR_PRINTER_DEVICE_ID` with your printer's device ID, so other
+printers' prints don't switch it: open the printer under **Settings → Devices
+& Services → Devices**; the ID is the last part of the page's address.
 
 ```yaml
 automation:
@@ -415,12 +418,16 @@ automation:
     trigger:
       - platform: event
         event_type: snapmaker_u1_print_started
+        event_data:
+          device_id: YOUR_PRINTER_DEVICE_ID
         id: started
       - platform: event
         event_type:
           - snapmaker_u1_print_complete
           - snapmaker_u1_print_cancelled
           - snapmaker_u1_print_failed
+        event_data:
+          device_id: YOUR_PRINTER_DEVICE_ID
         id: ended
     action:
       - choose:
