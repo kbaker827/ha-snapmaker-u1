@@ -387,6 +387,10 @@ It appears as its own **PopStatus** device, linked to the printer:
 On the dashboard card of the printer you picked, it adds a **Status bar**
 button to switch it on and off.
 
+| Status bar button on the card | PopStatus controls in Home Assistant |
+|---|---|
+| ![Snapmaker U1 card with the Status bar button](docs/images/popstatus-card.png) | ![PopStatus light, light mode and printer connection](docs/images/popstatus-controls.png) |
+
 Notes:
 - The PopStatus still needs to be set up and connected to your printer with
   BIQU's app or its own web page (`http://PopStatus.local`) first. Home Assistant
@@ -418,6 +422,8 @@ It appears as its own **PopKnomi** device, linked to the printer:
 | `select.popknomi_error_display` | How errors are shown: **Off**, **QR code** or **GIF** |
 | `select.popknomi_screen_off` | When the screen turns off: **Never**, **On standby** or **After 30 minutes idle** |
 | `binary_sensor.popknomi_printer_connection` | On while the PopKnomi is connected to the printer |
+
+<img src="docs/images/popknomi-controls.png" alt="PopKnomi print progress display, error display, screen off and printer connection" width="444">
 
 Notes:
 - Set it up and connect it to your printer with BIQU's app or its own web page
