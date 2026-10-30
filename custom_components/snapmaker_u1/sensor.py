@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -268,6 +270,50 @@ class SnapmakerSensor(SnapmakerBaseEntity, SensorEntity):
         self.entity_description = description
         host = coordinator.entry.data["host"]
         self._attr_unique_id = f"{host}_{description.key}"
+        self._last_write = 0.0
+        self._written_available: bool | None = None
+        self._pending_write = None
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Write the state, at most every ``min_update_interval`` seconds."""
+        interval = self.entity_description.min_update_interval
+        if not interval:
+            super()._handle_coordinator_update()
+            return
+        available = self.available
+        if available != self._written_available:
+            # Became (un)available, e.g. a print started or ended: show it now.
+            self._cancel_pending_write()
+            self._write_now()
+            return
+        if self._pending_write is not None:
+            return  # the latest value is written when the timer fires
+        wait = self._last_write + interval - time.monotonic()
+        if wait <= 0:
+            self._write_now()
+        else:
+            self._pending_write = async_call_later(self.hass, wait, self._flush_write)
+
+    @callback
+    def _flush_write(self, _now) -> None:
+        self._pending_write = None
+        self._write_now()
+
+    @callback
+    def _write_now(self) -> None:
+        self._last_write = time.monotonic()
+        self._written_available = self.available
+        self.async_write_ha_state()
+
+    def _cancel_pending_write(self) -> None:
+        if self._pending_write is not None:
+            self._pending_write()
+            self._pending_write = None
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._cancel_pending_write()
+        await super().async_will_remove_from_hass()
 
     @property
     def native_value(self):

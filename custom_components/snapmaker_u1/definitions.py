@@ -31,6 +31,26 @@ from .pysnapmaker.const import TOP_COVER_FILTER_LIFE_HOURS
 # ---------------------------------------------------------------------------
 
 
+def _print_eta(self):
+    """Estimated finish time, to the minute.
+
+    It's recalculated on every update (several a second while printing), so
+    keep the previous value unless the estimate moved by a minute or more.
+    """
+    remaining = self.coordinator.data.time_remaining
+    if remaining is None:
+        self._eta = None
+        return None
+    eta = (dt_util.utcnow() + timedelta(seconds=remaining)).replace(
+        second=0, microsecond=0
+    )
+    previous = getattr(self, "_eta", None)
+    if previous is not None and abs(eta - previous) < timedelta(minutes=1):
+        return previous
+    self._eta = eta
+    return eta
+
+
 @dataclass(frozen=True, kw_only=True)
 class SnapmakerSensorEntityDescription(SensorEntityDescription):
     """Extends SensorEntityDescription with lambdas used by the entity classes."""
@@ -40,6 +60,9 @@ class SnapmakerSensorEntityDescription(SensorEntityDescription):
     # Called with the coordinator; return False to skip creating this entity
     exists_fn: Callable = field(default=lambda coordinator: True)
     extra_attributes_fn: Callable = field(default=lambda self: {})
+    # Write the state at most this often (seconds; 0 = on every update). For
+    # values that change with every push, so they don't flood the recorder.
+    min_update_interval: float = 0
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +131,7 @@ PRINTER_SENSORS: list[SnapmakerSensorEntityDescription] = [
         ),
         available_fn=lambda self: self.coordinator.data.is_printing
         or self.coordinator.data.is_paused,
+        min_update_interval=10,
     ),
     SnapmakerSensorEntityDescription(
         key="total_duration",
@@ -121,6 +145,7 @@ PRINTER_SENSORS: list[SnapmakerSensorEntityDescription] = [
         ),
         available_fn=lambda self: self.coordinator.data.is_printing
         or self.coordinator.data.is_paused,
+        min_update_interval=10,
     ),
     SnapmakerSensorEntityDescription(
         key="time_remaining",
@@ -131,18 +156,14 @@ PRINTER_SENSORS: list[SnapmakerSensorEntityDescription] = [
         icon="mdi:timer-sand",
         value_fn=lambda self: self.coordinator.data.time_remaining,
         available_fn=lambda self: self.coordinator.data.is_printing,
+        min_update_interval=10,
     ),
     SnapmakerSensorEntityDescription(
         key="print_eta",
         translation_key="print_eta",
         device_class=SensorDeviceClass.TIMESTAMP,
         icon="mdi:clock-end",
-        value_fn=lambda self: (
-            dt_util.utcnow()
-            + timedelta(seconds=self.coordinator.data.time_remaining)
-            if self.coordinator.data.time_remaining is not None
-            else None
-        ),
+        value_fn=lambda self: _print_eta(self),
         available_fn=lambda self: self.coordinator.data.is_printing
         and self.coordinator.data.time_remaining is not None,
     ),
@@ -210,6 +231,9 @@ PRINTER_SENSORS: list[SnapmakerSensorEntityDescription] = [
         key="toolhead_position",
         translation_key="toolhead_position",
         icon="mdi:crosshairs-gps",
+        # Changes with every move while printing; off unless you need it.
+        entity_registry_enabled_default=False,
+        min_update_interval=10,
         value_fn=lambda self: (
             f"X{self.coordinator.data.toolhead.position[0]:.2f} "
             f"Y{self.coordinator.data.toolhead.position[1]:.2f} "
