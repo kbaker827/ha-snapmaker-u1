@@ -149,6 +149,31 @@ class FilamentSensor:
 
 
 @dataclass
+class Webcam:
+    """A camera the printer lists in Moonraker (internal, USB, ...)."""
+
+    name: str
+    snapshot_url: str
+    stream_url: str
+    primary: bool = False  # the first (internal) camera
+    # RTSP stream from the Extended Firmware's camera service, if enabled
+    rtsp_url: Optional[str] = None
+
+
+@dataclass
+class ExcludeObjectData:
+    """Klipper ``exclude_object``: the labelled objects of the current print."""
+
+    objects: list[str] = field(default_factory=list)
+    excluded: list[str] = field(default_factory=list)
+    current: Optional[str] = None
+
+    @property
+    def remaining(self) -> list[str]:
+        return [o for o in self.objects if o not in self.excluded]
+
+
+@dataclass
 class SnapmakerPrinterData:
     """Complete snapshot of Snapmaker U1 printer state."""
 
@@ -171,6 +196,15 @@ class SnapmakerPrinterData:
     chamber_filters: dict[str, bool] = field(default_factory=dict)
     # Official Top Cover (None when the firmware has no purifier object)
     top_cover: Optional[TopCoverData] = None
+
+    # Klipper exclude_object (None when Klipper has no [exclude_object])
+    exclude_object: Optional[ExcludeObjectData] = None
+    # Moonraker Spoolman: active spool (None = none set) and server link
+    active_spool_id: Optional[int] = None
+    spoolman_connected: Optional[bool] = None
+    # Moonraker timelapse plugin
+    timelapse_enabled: Optional[bool] = None
+    last_timelapse: Optional[str] = None  # file name in the "timelapse" root
 
     # Motion / overrides
     toolhead: Toolhead = field(default_factory=Toolhead)

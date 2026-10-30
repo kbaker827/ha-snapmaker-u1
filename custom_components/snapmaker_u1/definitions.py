@@ -363,6 +363,34 @@ TOP_COVER_SENSORS: list[SnapmakerSensorEntityDescription] = [
 
 
 # ---------------------------------------------------------------------------
+# Extended Firmware / optional Moonraker components
+# ---------------------------------------------------------------------------
+
+EXCLUDE_OBJECT_SENSOR = SnapmakerSensorEntityDescription(
+    key="current_object",
+    translation_key="current_object",
+    icon="mdi:cube-outline",
+    value_fn=lambda self: self.coordinator.data.exclude_object.current,
+    extra_attributes_fn=lambda self: {
+        "objects": self.coordinator.data.exclude_object.objects,
+        "excluded_objects": self.coordinator.data.exclude_object.excluded,
+    },
+)
+
+TIMELAPSE_SENSOR = SnapmakerSensorEntityDescription(
+    key="last_timelapse",
+    translation_key="last_timelapse",
+    icon="mdi:filmstrip",
+    value_fn=lambda self: self.coordinator.data.last_timelapse,
+    extra_attributes_fn=lambda self: (
+        {"url": self.coordinator.client.timelapse_url(self.coordinator.data.last_timelapse)}
+        if self.coordinator.data.last_timelapse
+        else {}
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
 # Extruder sensors (instantiated per detected extruder in sensor.py)
 # ---------------------------------------------------------------------------
 

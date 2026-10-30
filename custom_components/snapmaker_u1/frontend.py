@@ -172,6 +172,12 @@ def ws_entities(
                     coordinator.printer_name if coordinator is not None else entry.title
                 ),
                 "entities": entities,
+                # Extended Firmware remote screen page, if enabled
+                "screen_url": (
+                    coordinator.client.screen_url
+                    if coordinator is not None and coordinator.client is not None
+                    else None
+                ),
             }
         )
     connection.send_result(msg["id"], {"printers": printers})

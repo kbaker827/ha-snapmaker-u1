@@ -134,6 +134,20 @@ TOP_COVER_NUMBERS: list[SnapmakerNumberEntityDescription] = [
 ]
 
 
+# Spoolman spool ID; 0 clears the active spool
+ACTIVE_SPOOL_NUMBER = SnapmakerNumberEntityDescription(
+    key="active_spool",
+    translation_key="active_spool",
+    native_min_value=0,
+    native_max_value=999999,
+    native_step=1,
+    mode=NumberMode.BOX,
+    icon="mdi:printer-3d-nozzle-heat",
+    value_fn=lambda coordinator: coordinator.data.active_spool_id or 0,
+    set_fn=lambda client, v: client.set_active_spool(int(v)),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -191,6 +205,10 @@ async def async_setup_entry(
             available_fn=lambda coordinator: coordinator.data.is_ready,
         )
         entities.append(SnapmakerNumberEntity(coordinator, desc))
+
+    # Moonraker Spoolman: the spool loaded on the printer
+    if coordinator.client and coordinator.client.has_spoolman:
+        entities.append(SnapmakerNumberEntity(coordinator, ACTIVE_SPOOL_NUMBER))
 
     # Official Top Cover fans
     if coordinator.client and coordinator.client.has_top_cover:

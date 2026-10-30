@@ -23,6 +23,7 @@ shows your printer's real camera and values.</sub>
 - [Official Top Cover](#official-top-cover)
 - [BIQU PopStatus light bar](#biqu-popstatus-light-bar)
 - [BIQU PopKnomi status display](#biqu-popknomi-status-display)
+- [Extended Firmware extras](#extended-firmware-extras)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Authentication](#authentication)
@@ -70,6 +71,7 @@ No Snapmaker account or cloud connection is required. The integration does
 | Part Cooling Fan | Fan speed in % |
 | Print Speed / Flow Rate | Current speed and flow overrides in % |
 | Klipper State | `ready` / `startup` / `shutdown` / `error` |
+| Current Object / Last Timelapse | Object being printed and the newest timelapse video, if available ([details](#extended-firmware-extras)) |
 | Toolhead Position | X/Y/Z coordinates (with individual attributes). **Disabled by default**: it changes with every move, so enable it under the entity's settings if you need it (updated every 10 s) |
 
 ### Binary sensors
@@ -103,6 +105,7 @@ No Snapmaker account or cloud connection is required. The integration does
 | Print File | Pick a file from the printer and start printing it ([details](#starting-a-print)) |
 | Active Tool | Switch between T0–T3 |
 | Work Light | The cavity light (reads its real state from the printer) |
+| Exclude Object / Active Spool / Timelapse | Skip an object mid-print, the active Spoolman spool, and timelapse recording, if available ([details](#extended-firmware-extras)) |
 | DragonBreath Filter | Chamber filter fan, if present |
 | Top Cover Mode / Exhaust Fan / Circulation Fan | Official Top Cover purifier mode and fans, if fitted ([details](#official-top-cover)) |
 | PopStatus Light / Light mode | BIQU PopStatus light bar on/off, brightness and Simple/Advanced mode ([details](#biqu-popstatus-light-bar)) |
@@ -131,6 +134,11 @@ with `snapmaker_u1.start_print`.
 ### Camera
 - **Webcam**: camera URLs are discovered from Moonraker (`/server/webcams/list`),
   falling back to `/webcam/snapshot.jpg` and `/webcam/stream.mjpg`.
+- **Every camera** the printer lists gets its own camera entity, e.g. a USB
+  camera at `/webcam2/` on the Extended Firmware becomes `camera.<printer>_webcam_usb`
+  ([details](#extended-firmware-extras)).
+- **RTSP**: when the Extended Firmware's RTSP server is on, Home Assistant
+  plays (and can record) its H.264 stream instead of the MJPEG proxy.
 - If the snapshot endpoint fails, a frame is taken from the MJPEG stream
   instead. That also wakes a stock U1 camera that has gone idle.
 - The live view proxies the printer's MJPEG stream directly.
@@ -148,6 +156,7 @@ with `snapmaker_u1.start_print`.
 | `snapmaker_u1.set_bed_temperature` | Set heated-bed target (°C) |
 | `snapmaker_u1.set_nozzle_temperature` | Set a nozzle target (°C) by extruder index |
 | `snapmaker_u1.start_print` | Start a file that is already on the printer |
+| `snapmaker_u1.exclude_object` | Stop printing one labelled object of the running print ([details](#exclude-object)) |
 
 All services take the printer's `config_entry_id`.
 
@@ -199,7 +208,8 @@ What it shows:
 - **Speed, flow and fan** at a glance. Tap to adjust.
 - ⚠️ **Alerts** for printer errors and filament runout.
 - 🎛️ **Controls**: Pause/Resume, Cancel, Light, Filter (Panda Breath), Status
-  bar (PopStatus), Home and E-Stop. Cancel and E-Stop need a second tap to confirm.
+  bar (PopStatus), Screen (Extended Firmware remote screen), Home and E-Stop.
+  Cancel and E-Stop need a second tap to confirm.
 
 Options (all optional; all except `chamber_presets` are also in the visual editor):
 
@@ -500,6 +510,89 @@ automation:
 
 ---
 
+## Extended Firmware extras
+
+The [U1 Extended Firmware](https://github.com/paxx12-snapmaker-u1/SnapmakerU1-Extended-Firmware)
+adds features that the integration picks up by itself once they're enabled
+(most are in its Firmware Config page, `http://<printer-ip>/firmware-config/`).
+Nothing appears for features that aren't enabled.
+
+![Card with the Screen button](docs/images/card-screen-button.png)
+
+### Second (USB) camera
+
+Every camera the printer lists in Moonraker becomes a camera entity. The
+internal camera stays `camera.<printer>_webcam`; a USB camera (enabled under
+**Camera** in Firmware Config, served at `/webcam2/`) appears as
+`camera.<printer>_webcam_usb`. The touchscreen mirror ("gui") isn't treated as
+a camera.
+
+### RTSP streams
+
+With **RTSP** enabled in Firmware Config, the printer serves H.264 streams at
+`rtsp://<printer-ip>:8554/stream` (internal camera) and `:8555` (USB camera).
+The integration checks for them at startup; when found, the camera uses the
+RTSP stream for its live view, so you get smooth video and can record clips
+with Home Assistant. Its `rtsp_url` attribute shows the stream in use.
+Reload the integration after turning RTSP on or off.
+
+### Exclude object
+
+If your slicer labels objects (*Exclude objects* in Orca / Snapmaker Orca) and
+Klipper has `[exclude_object]`, you get:
+
+| Entity | What it does |
+|---|---|
+| `sensor.<printer>_current_object` | The object being printed; attributes list all `objects` and the `excluded_objects` |
+| `select.<printer>_exclude_object` | Pick an object to stop printing it. **This takes effect immediately and can't be undone for this print.** Only available while printing |
+
+The `snapmaker_u1.exclude_object` service does the same from automations or
+scripts (`name`: an entry from the sensor's `objects` attribute).
+
+### Spoolman active spool
+
+With [Spoolman](https://github.com/paxx12-snapmaker-u1/SnapmakerU1-Extended-Firmware/blob/main/docs/spoolman.md)
+set up in Moonraker, `number.<printer>_active_spool` shows the ID of the spool
+Moonraker is tracking and lets you change it (`0` clears it). Spoolman then
+deducts the filament used by each print from that spool. For spool details
+(weight left, colour, ...), use Home Assistant's Spoolman integration.
+
+### Timelapse
+
+The Extended Firmware lists the printer's own timelapse recordings (made when
+timelapse is on in the slicer or on the touchscreen) in Moonraker's
+`timelapse` folder:
+
+| Entity | What it does |
+|---|---|
+| `sensor.<printer>_last_timelapse` | File name of the newest timelapse video; its `url` attribute is a download link. Updates when a new video appears (checked again for a few minutes after each print, while it's still being written) |
+| `switch.<printer>_timelapse` | Record a timelapse of each print on or off. Only with the full [moonraker-timelapse](https://github.com/mainsail-crew/moonraker-timelapse) plugin; the Extended Firmware ships a stub that can't switch recording, so there the switch doesn't appear |
+
+Example: send the timelapse link when a video is ready.
+
+```yaml
+automation:
+  - alias: "U1 timelapse ready"
+    trigger:
+      - platform: state
+        entity_id: sensor.snapmaker_u1_last_timelapse
+    condition:
+      - condition: template
+        value_template: "{{ trigger.to_state.state not in ['unknown', 'unavailable'] }}"
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          message: "Timelapse ready: {{ state_attr('sensor.snapmaker_u1_last_timelapse', 'url') }}"
+```
+
+### Remote screen
+
+With **Remote Screen Access** enabled, the dashboard card gets a **Screen**
+button that opens the printer's touchscreen (`http://<printer-ip>/screen/`) in
+a new tab, where you can view and use it.
+
+---
+
 ## Installation
 
 ### HACS (recommended)
@@ -601,6 +694,7 @@ automation:
 | PopStatus / PopKnomi entities `unavailable` | Check the device is powered and its address is still right: open `http://<address>` in a browser, and fix it with ⋮ → Reconfigure on its entry if needed. Give it a fixed IP in your router so it doesn't change |
 | Top Cover entities missing | Plug the cover in and update the printer to firmware 1.3.0 or later. The entities appear by themselves once the printer detects the cover |
 | Panda Breath entities missing | Enable it in the printer's Firmware Config page first (Extended Firmware only), then reload the integration |
+| USB camera, RTSP, Spoolman, Last Timelapse or Screen button missing | Enable the feature in the Extended Firmware's Firmware Config page, then reload the integration (Settings → Devices & Services → Snapmaker U1 → ⋮ → Reload). They're detected when the integration starts |
 | PopStatus / PopKnomi not in the Add Integration menu | Update to 1.12.0 (PopStatus) or 1.13.0 (PopKnomi) or later and restart Home Assistant |
 | Sensors fill up the recorder / database | Update to 1.13.1 or later: time sensors update at most every 10 s, the ETA once a minute, and Toolhead Position is off by default. To keep a sensor out of history entirely, exclude it in the [`recorder`](https://www.home-assistant.io/integrations/recorder/) settings |
 | Temperatures show 0 after startup | Klipper may still be initialising; values update within seconds once it's ready |
@@ -630,6 +724,10 @@ automation:
   not the printer is on
 - **Top Cover**: read from the stock firmware's Klipper `purifier` object;
   controlled with `SET_PURIFIER_MODE` / `SET_PURIFIER`
+- **Extended Firmware extras**: cameras from `/server/webcams/list`, RTSP by
+  probing ports 8554/8555, Spoolman and timelapse via Moonraker's `spoolman` /
+  `timelapse` components (`/server/info`), exclude object via Klipper's
+  `exclude_object` object and `EXCLUDE_OBJECT`
 - **HA version**: Home Assistant 2024.1+
 - **Icon**: shipped in `custom_components/snapmaker_u1/brand/` (light and dark,
   256 px and 512 px), which Home Assistant 2026.3+ uses automatically. Older

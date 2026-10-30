@@ -7,7 +7,7 @@
  * temperatures and print controls for one printer.
  */
 
-const CARD_VERSION = "1.13.1";
+const CARD_VERSION = "1.14.0";
 const DOMAIN = "snapmaker_u1";
 
 const ACCENTS = {
@@ -793,6 +793,9 @@ class SnapmakerU1Card extends HTMLElement {
         this._control("toggle:light.popstatus_light", on ? "mdi:led-strip-variant" : "mdi:led-strip-variant-off", "Status bar", on ? "on" : "", false, bar.state === "unavailable")
       );
     }
+    if (this._printer?.screen_url) {
+      buttons.push(this._control("screen", "mdi:cellphone-screenshot", "Screen", "", false, offline));
+    }
     if (!active && this._eid("button.home_all")) {
       buttons.push(this._control("home", "mdi:home-import-outline", "Home", "", false, offline));
     }
@@ -860,6 +863,10 @@ class SnapmakerU1Card extends HTMLElement {
         break;
       case "home":
         press("button.home_all");
+        break;
+      case "screen":
+        // The printer's touchscreen in a new tab (Extended Firmware remote screen)
+        window.open(this._printer.screen_url, "_blank", "noopener");
         break;
       case "estop":
         press("button.emergency_stop");

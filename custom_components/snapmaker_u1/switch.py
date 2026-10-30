@@ -31,6 +31,9 @@ async def async_setup_entry(
     entities: list[SwitchEntity] = [WorkLightSwitch(coordinator)]
     filter_keys = coordinator.client.chamber_filter_keys if coordinator.client else []
     entities.extend(ChamberFilterSwitch(coordinator, key) for key in filter_keys)
+    # Only the full timelapse plugin can be switched (not the firmware stub)
+    if coordinator.client and coordinator.client.has_timelapse_control:
+        entities.append(TimelapseSwitch(coordinator))
     async_add_entities(entities)
 
 
@@ -138,3 +141,35 @@ class ChamberFilterSwitch(SnapmakerBaseEntity, SwitchEntity):
             await client.set_chamber_filter(self._pin_key, on)
         except Exception as exc:
             _LOGGER.error("Error switching %s: %s", self._pin_key, exc)
+
+
+class TimelapseSwitch(SnapmakerBaseEntity, SwitchEntity):
+    """Moonraker timelapse plugin on/off (records frames during prints)."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "timelapse"
+    _attr_icon = "mdi:timelapse"
+
+    def __init__(self, coordinator: SnapmakerDataUpdateCoordinator) -> None:
+        super().__init__(coordinator)
+        host = coordinator.entry.data["host"]
+        self._attr_unique_id = f"{host}_timelapse"
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator.data.timelapse_enabled if self.coordinator.data else None
+
+    async def async_turn_on(self, **kwargs) -> None:
+        await self._set(True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self._set(False)
+
+    async def _set(self, on: bool) -> None:
+        client = self.coordinator.client
+        if client is None:
+            return
+        try:
+            await client.set_timelapse_enabled(on)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.error("Could not switch timelapse %s: %s", "on" if on else "off", exc)

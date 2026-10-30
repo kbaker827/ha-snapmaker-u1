@@ -136,7 +136,9 @@
       "chamber_temperature": { "name": "Temperature" },
       "top_cover_filter_used": { "name": "Top Cover Filter Used" },
       "top_cover_filter_life": { "name": "Top Cover Filter Life" },
-      "top_cover_circulation_rpm": { "name": "Top Cover Circulation Fan RPM" }
+      "top_cover_circulation_rpm": { "name": "Top Cover Circulation Fan RPM" },
+      "current_object": { "name": "Current object" },
+      "last_timelapse": { "name": "Last timelapse" }
     },
     "binary_sensor": {
       "printer_ready": { "name": "Printer Ready" },
@@ -168,7 +170,8 @@
       "speed_factor_setpoint": { "name": "Print Speed Override" },
       "flow_rate_setpoint": { "name": "Flow Rate Override" },
       "top_cover_exhaust_fan": { "name": "Top Cover Exhaust Fan" },
-      "top_cover_circulation_fan": { "name": "Top Cover Circulation Fan" }
+      "top_cover_circulation_fan": { "name": "Top Cover Circulation Fan" },
+      "active_spool": { "name": "Active spool" }
     },
     "select": {
       "print_file": { "name": "Print File" },
@@ -213,10 +216,12 @@
           "standby": "On standby",
           "inactivity": "After 30 minutes idle"
         }
-      }
+      },
+      "exclude_object": { "name": "Exclude object" }
     },
     "switch": {
-      "work_light": { "name": "Work Light" }
+      "work_light": { "name": "Work Light" },
+      "timelapse": { "name": "Timelapse" }
     },
     "light": {
       "popstatus_light": { "name": "Light" }
@@ -247,6 +252,20 @@
     "start_print": {
       "name": "Start Print",
       "description": "Start printing a G-code file from the printer's storage."
+    },
+    "exclude_object": {
+      "name": "Exclude object",
+      "description": "Stop printing one labelled object of the running print (EXCLUDE_OBJECT). Needs object labels from the slicer. Can't be undone for this print.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config Entry",
+          "description": "The config entry ID for the printer."
+        },
+        "name": {
+          "name": "Object name",
+          "description": "The object's name, as listed in the Current Object sensor's \"objects\" attribute."
+        }
+      }
     }
   }
 }
