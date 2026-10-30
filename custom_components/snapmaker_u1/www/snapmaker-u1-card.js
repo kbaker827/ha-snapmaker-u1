@@ -7,7 +7,7 @@
  * temperatures and print controls for one printer.
  */
 
-const CARD_VERSION = "1.14.0";
+const CARD_VERSION = "1.14.1";
 const DOMAIN = "snapmaker_u1";
 
 const ACCENTS = {
@@ -155,6 +155,7 @@ class SnapmakerU1Card extends HTMLElement {
     this._cameraFallback = false;
     this._snapshotTimer = null;
     this.shadowRoot.addEventListener("click", (ev) => this._onClick(ev));
+    this.shadowRoot.addEventListener("change", (ev) => this._onChange(ev));
   }
 
   setConfig(config) {
@@ -356,10 +357,15 @@ class SnapmakerU1Card extends HTMLElement {
           // new spool colour or heater target with the same state).
           return s ? `${s.state}|${s.last_updated ?? ""}|${s.attributes.klipper_message ?? ""}` : "";
         })
-        .join(";") + `|${this._armed?.action ?? ""}`;
+        .join(";") + `|${this._armed?.action ?? ""}|${this._popOpen ? 1 : 0}`;
     if (signature === this._signature) return;
     this._signature = signature;
     patchHTML(this._contentEl, this._renderContent());
+    // patchHTML only updates the value attribute; move sliders to the new
+    // value unless the user is dragging one.
+    for (const input of this._contentEl.querySelectorAll("input[type=range]")) {
+      if (this.shadowRoot.activeElement !== input) input.value = input.getAttribute("value");
+    }
   }
 
   _updateCamera() {
@@ -447,7 +453,8 @@ class SnapmakerU1Card extends HTMLElement {
       ${this._config.show_chamber_presets !== false ? this._renderChamberPresets() : ""}
       ${this._config.show_top_cover !== false ? this._renderTopCover() : ""}
       ${this._renderStats()}
-      ${this._config.show_controls !== false ? this._renderControls(status, light) : ""}`;
+      ${this._config.show_controls !== false ? this._renderControls(status, light) : ""}
+      ${this._popOpen ? this._renderPopStatus() : ""}`;
   }
 
   _renderAlerts() {
@@ -789,8 +796,9 @@ class SnapmakerU1Card extends HTMLElement {
     const bar = this._state("light.popstatus_light");
     if (bar && !bar.attributes.restored) {
       const on = bar.state === "on";
+      // Opens the PopStatus panel (on/off, brightness, mode) under the controls
       buttons.push(
-        this._control("toggle:light.popstatus_light", on ? "mdi:led-strip-variant" : "mdi:led-strip-variant-off", "Status bar", on ? "on" : "", false, bar.state === "unavailable")
+        this._control("pop-panel", on ? "mdi:led-strip-variant" : "mdi:led-strip-variant-off", "Status bar", `${on ? "on" : ""} ${this._popOpen ? "open" : ""}`.trim())
       );
     }
     if (this._printer?.screen_url) {
@@ -803,6 +811,69 @@ class SnapmakerU1Card extends HTMLElement {
       buttons.push(this._control("estop", "mdi:alert-octagon", "E-Stop", "danger", true, offline));
     }
     return `<div class="controls">${buttons.join("")}</div>`;
+  }
+
+  // BIQU PopStatus controls, shown when the Status bar button is tapped.
+  _renderPopStatus() {
+    const lightId = this._eid("light.popstatus_light");
+    const bar = lightId && this._hass.states[lightId];
+    if (!bar) return "";
+    const offline = bar.state === "unavailable";
+    const on = bar.state === "on";
+    const pct = bar.attributes.brightness != null ? Math.round((bar.attributes.brightness * 100) / 255) : 0;
+    const modeId = this._eid("select.popstatus_light_mode");
+    const mode = modeId && this._hass.states[modeId];
+    const advanced = mode?.state === "advanced";
+    const link = this._state("binary_sensor.popstatus_printer_link");
+    const linkText = offline
+      ? "Light bar offline"
+      : link?.state === "on"
+        ? "Connected to printer"
+        : link?.state === "off"
+          ? "Not connected to printer"
+          : "";
+    const chip = (action, attrs, label, icon, active, disabled) => `
+      <button class="preset ${active ? "active" : ""}" data-action="${action}" ${attrs} ${disabled ? "disabled" : ""}>
+        <ha-icon icon="${icon}"></ha-icon><span class="preset-temp">${label}</span>
+      </button>`;
+    return `
+      <div class="presets pop">
+        <div class="presets-title">
+          <ha-icon icon="mdi:led-strip-variant"></ha-icon>PopStatus
+          <span class="pop-link ${link?.state === "on" && !offline ? "ok" : ""}">${esc(linkText)}</span>
+        </div>
+        <div class="preset-row">
+          ${chip("pop-power", 'data-on="1"', "On", "mdi:power", on, offline)}
+          ${chip("pop-power", 'data-on="0"', "Off", "mdi:power-off", !on && !offline, offline)}
+        </div>
+        <label class="pop-slider ${advanced ? "muted" : ""}" title="${advanced ? "In Advanced mode each effect has its own brightness (PopStatus web page)" : "Brightness"}">
+          <ha-icon icon="mdi:brightness-6"></ha-icon>
+          <input type="range" min="1" max="100" step="1" value="${pct || 1}" data-action="pop-brightness"
+            data-entity="${esc(lightId)}" ${offline ? "disabled" : ""}>
+          <span>${on ? `${pct}%` : "Off"}</span>
+        </label>
+        ${mode ? `<div class="preset-row">
+          ${chip("pop-mode", `data-entity="${esc(modeId)}" data-option="simple"`, "Simple", "mdi:led-strip", mode.state === "simple", offline)}
+          ${chip("pop-mode", `data-entity="${esc(modeId)}" data-option="advanced"`, "Advanced", "mdi:auto-fix", advanced, offline)}
+        </div>` : ""}
+        <div class="pop-links">
+          <button class="pop-more" data-action="more-info" data-entity="${esc(lightId)}">
+            <ha-icon icon="mdi:tune-variant"></ha-icon>More settings
+          </button>
+          ${bar.attributes.web_ui ? `<a class="pop-more" href="${esc(bar.attributes.web_ui)}" target="_blank" rel="noopener">
+            <ha-icon icon="mdi:open-in-new"></ha-icon>Effects &amp; colours</a>` : ""}
+        </div>
+      </div>`;
+  }
+
+  _onChange(ev) {
+    const target = ev.composedPath().find((el) => el.dataset && el.dataset.action);
+    if (target?.dataset.action === "pop-brightness") {
+      this._hass.callService("light", "turn_on", {
+        entity_id: target.dataset.entity,
+        brightness_pct: Number(target.value),
+      });
+    }
   }
 
   _control(action, icon, label, variant = "", confirm = false, disabled = false) {
@@ -863,6 +934,20 @@ class SnapmakerU1Card extends HTMLElement {
         break;
       case "home":
         press("button.home_all");
+        break;
+      case "pop-panel":
+        this._popOpen = !this._popOpen;
+        break;
+      case "pop-power":
+        this._hass.callService("light", target.dataset.on === "1" ? "turn_on" : "turn_off", {
+          entity_id: this._eid("light.popstatus_light"),
+        });
+        break;
+      case "pop-mode":
+        this._hass.callService("select", "select_option", {
+          entity_id: target.dataset.entity,
+          option: target.dataset.option,
+        });
         break;
       case "screen":
         // The printer's touchscreen in a new tab (Extended Firmware remote screen)
@@ -1070,6 +1155,23 @@ const STYLES = `
   .preset:disabled { opacity: .4; cursor: default; }
   .preset-name { font-size: 12px; font-weight: 600; }
   .cover .preset-row { grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); }
+  .pop .preset-row { grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); }
+  .pop .preset { --mdc-icon-size: 18px; }
+  .pop .preset.active { border-color: var(--sm-accent); background: color-mix(in srgb, var(--sm-accent) 14%, transparent); }
+  .pop .preset.active .preset-temp, .pop .preset.active ha-icon { color: var(--sm-accent); }
+  .pop .presets-title ha-icon { color: var(--sm-accent); }
+  .pop-link { margin-left: auto; }
+  .pop-link.ok { color: var(--success-color, #43a047); }
+  .pop-slider { display: flex; align-items: center; gap: 8px; font-size: 13px; --mdc-icon-size: 18px; }
+  .pop-slider input { flex: 1; accent-color: var(--sm-accent); }
+  .pop-slider span { min-width: 34px; text-align: right; color: var(--secondary-text-color); }
+  .pop-slider.muted { opacity: .55; }
+  .pop-links { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pop-more {
+    display: inline-flex; align-items: center; gap: 4px; font: inherit; font-size: 12px; cursor: pointer;
+    color: var(--primary-color); background: none; border: none; padding: 2px 0; text-decoration: none; --mdc-icon-size: 16px;
+  }
+  .control.open { box-shadow: inset 0 0 0 2px var(--sm-accent); }
   .cover .preset { --mdc-icon-size: 18px; }
   .cover .preset.active { border-color: var(--primary-color); background: color-mix(in srgb, var(--primary-color) 14%, transparent); }
   .cover .preset.active .preset-temp, .cover .preset.active ha-icon { color: var(--primary-color); }

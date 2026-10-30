@@ -65,12 +65,22 @@ class PopStatusClient:
         self.data = PopStatusData()
 
     @property
-    def ws_url(self) -> str:
+    def bare_host(self) -> str:
+        """The host without the ``http://`` or ``ws://`` it may be entered with."""
         host = self.host
         for prefix in ("http://", "ws://"):
             if host.startswith(prefix):
                 host = host[len(prefix):]
-        return f"ws://{host}/ws"
+        return host
+
+    @property
+    def ws_url(self) -> str:
+        return f"ws://{self.bare_host}/ws"
+
+    @property
+    def web_url(self) -> str:
+        """The device's own web UI."""
+        return f"http://{self.bare_host}"
 
     @classmethod
     async def test_connection(

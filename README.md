@@ -208,7 +208,7 @@ What it shows:
 - **Speed, flow and fan** at a glance. Tap to adjust.
 - ⚠️ **Alerts** for printer errors and filament runout.
 - 🎛️ **Controls**: Pause/Resume, Cancel, Light, Filter (Panda Breath), Status
-  bar (PopStatus), Screen (Extended Firmware remote screen), Home and E-Stop.
+  bar (opens the PopStatus panel), Screen (Extended Firmware remote screen), Home and E-Stop.
   Cancel and E-Stop need a second tap to confirm.
 
 Options (all optional; all except `chamber_presets` are also in the visual editor):
@@ -395,11 +395,20 @@ It appears as its own **PopStatus** device, linked to the printer:
 | `binary_sensor.popstatus_printer_connection` | On while the PopStatus is connected to the printer |
 
 On the dashboard card of the printer you picked, it adds a **Status bar**
-button to switch it on and off.
+button. Tap it to open the PopStatus panel:
+- **On / Off**
+- **Brightness** slider (Simple mode; in Advanced mode each effect has its own
+  brightness, so the slider is dimmed)
+- **Simple / Advanced** light mode
+- whether it's **connected to the printer**
+- **More settings** (Home Assistant's light dialog) and **Effects & colours**
+  (opens the PopStatus web page)
 
-| Status bar button on the card | PopStatus controls in Home Assistant |
+Tap **Status bar** again to close it.
+
+| PopStatus panel on the card | PopStatus controls in Home Assistant |
 |---|---|
-| ![Snapmaker U1 card with the Status bar button](docs/images/popstatus-card.png) | ![PopStatus light, light mode and printer connection](docs/images/popstatus-controls.png) |
+| ![Snapmaker U1 card with the PopStatus panel open](docs/images/popstatus-card.png) | ![PopStatus light, light mode and printer connection](docs/images/popstatus-controls.png) |
 
 Notes:
 - The PopStatus still needs to be set up and connected to your printer with

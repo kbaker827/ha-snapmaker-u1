@@ -54,7 +54,7 @@ class PopStatusEntity(Entity):
             name=model,
             manufacturer="BIQU",
             model=model,
-            configuration_url=f"http://{client.host}",
+            configuration_url=client.web_url,
         )
         printer = hass.config_entries.async_get_entry(
             entry.data.get(CONF_PRINTER_ENTRY_ID) or ""
