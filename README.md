@@ -57,8 +57,8 @@ No Snapmaker account or cloud connection is required. The integration does
 | Current Layer / Total Layers | Layer counter for the current print |
 | Print Duration | Active printing time (excludes pauses) |
 | Total Duration | Time since the print started (includes pauses) |
-| Time Remaining | Estimated time left |
-| Print ETA | Estimated finish time (timestamp) |
+| Time Remaining | Estimated time left (updated every 10 s) |
+| Print ETA | Estimated finish time, to the minute (timestamp) |
 | Filament Used | Millimetres of filament consumed |
 | Filename | Name of the file being printed |
 | Bed Temperature / Bed Target | Heated-bed current and target temperature |
@@ -70,7 +70,7 @@ No Snapmaker account or cloud connection is required. The integration does
 | Part Cooling Fan | Fan speed in % |
 | Print Speed / Flow Rate | Current speed and flow overrides in % |
 | Klipper State | `ready` / `startup` / `shutdown` / `error` |
-| Toolhead Position | X/Y/Z coordinates (with individual attributes) |
+| Toolhead Position | X/Y/Z coordinates (with individual attributes). **Disabled by default**: it changes with every move, so enable it under the entity's settings if you need it (updated every 10 s) |
 
 ### Binary sensors
 | Entity | Description |
@@ -528,6 +528,9 @@ automation:
 - **IoT class**: `local_push` (push updates via WebSocket, no cloud dependency)
 - **Reconnection**: Exponential back-off from 5 s to 60 s, always waiting between attempts (even when the printer closes the socket itself)
 - **Availability**: When the connection drops, the integration polls straight away; if the printer doesn't answer, every entity (camera included) shows `unavailable` instead of its last value
+- **Recorder load**: values that change with every update while printing
+  (print duration, total duration, time remaining, toolhead position) are
+  written at most every 10 seconds, and the ETA only when it moves by a minute
 - **Extruders**: Up to 4 nozzles auto-detected (T0–T3)
 - **Dashboard card**: served by the integration from `/snapmaker_u1_static/`
   and registered as a dashboard resource (an extra frontend module in YAML
