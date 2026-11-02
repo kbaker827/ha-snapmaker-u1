@@ -5,8 +5,9 @@
 > A Home Assistant custom integration for the **Snapmaker U1** 3D printer,
 > inspired by [ha-bambulab](https://github.com/greghesp/ha-bambulab).
 > Live status, temperatures, loaded filament colours, camera, print controls,
-> official Top Cover, BIQU Panda Breath, PopStatus and PopKnomi support, and a
-> built-in dashboard card. No cloud needed.
+> official Top Cover, BIQU Panda Breath / DragonBreath (including filament
+> drying), PopStatus and PopKnomi support, and a built-in dashboard card.
+> No cloud needed.
 
 ![Snapmaker U1 dashboard card: printing (light and dark), paused and idle](docs/images/card-overview.png)
 
@@ -53,7 +54,7 @@ No Snapmaker account or cloud connection is required. The integration does
 ### Sensors
 | Entity | Description |
 |---|---|
-| Print State | `standby` / `printing` / `paused` / `complete` / `error` / `cancelled` |
+| Print State | `standby` / `printing` / `paused` / `complete` / `error` / `cancelled`. Pick these directly in the automation editor ([example](#automations)) |
 | Print Progress | Percentage complete |
 | Current Layer / Total Layers | Layer counter for the current print |
 | Print Duration | Active printing time (excludes pauses; updated every 10 s) |
@@ -202,7 +203,8 @@ What it shows:
   remaining, ETA and elapsed time.
 - 🌡️ **Temperature tiles** for each nozzle (T0–T3, with the active tool
   highlighted), the bed, the chamber and the Panda Breath (if present).
-  Tap a tile to set its target.
+  Tap a tile to set its target. The chamber heater tile shows **Drying** with
+  the time left, **Fault** or **Offline** when that applies.
 - 🔥 **Chamber heater presets**: one-tap filament buttons (PLA, ABS, PC, …) for a
   Panda Breath / DragonBreath ([details](#filament-presets)).
 - 🌬️ **Top Cover**: one-tap Off / Cooling / Keep warm buttons and the filter
@@ -574,7 +576,8 @@ automation:
 The [U1 Extended Firmware](https://github.com/paxx12-snapmaker-u1/SnapmakerU1-Extended-Firmware)
 adds features that the integration picks up by itself once they're enabled
 (most are in its Firmware Config page, `http://<printer-ip>/firmware-config/`).
-Nothing appears for features that aren't enabled.
+Nothing appears for features that aren't enabled. The Panda Breath /
+DragonBreath chamber heater has [its own section](#panda-breath--dragonbreath-chamber-heater).
 
 ![Card with the Screen button](docs/images/card-screen-button.png)
 
@@ -737,6 +740,30 @@ automation:
           message: "Your Snapmaker U1 print is done!"
 ```
 
+You can also trigger on the **Print State** sensor. In the automation editor,
+pick *Entity → State*, choose Print State, and select a state such as
+*Printing* or *Complete*. In YAML:
+
+```yaml
+automation:
+  - alias: "U1 print failed"
+    trigger:
+      - platform: state
+        entity_id: sensor.<printer>_print_state
+        to: error
+    action:
+      - service: notify.notify
+        data:
+          message: "Your Snapmaker U1 print failed."
+```
+
+More examples elsewhere in this README:
+- [Filament drying finished](#filament-drying-panda-breath) (Panda Breath)
+- [Top Cover filter reminder](#official-top-cover)
+- [PopStatus on while printing](#biqu-popstatus-light-bar)
+- [PopKnomi screen off at night](#biqu-popknomi-status-display)
+- [Send the timelapse link](#timelapse)
+
 ---
 
 ## Troubleshooting
@@ -752,7 +779,10 @@ automation:
 | Print File shows "Unavailable" | Update to 1.7.1 or later (older versions misread the printer's file list). It's also unavailable while the printer isn't ready or has no files in its storage |
 | PopStatus / PopKnomi entities `unavailable` | Check the device is powered and its address is still right: open `http://<address>` in a browser, and fix it with ⋮ → Reconfigure on its entry if needed. Give it a fixed IP in your router so it doesn't change. Short drops (e.g. while its web page is open) are ridden out: entities only go `unavailable` after a minute without a connection. If it keeps dropping, check its Wi-Fi signal and turn on debug logging for `custom_components.snapmaker_u1` to see why it closed |
 | Top Cover entities missing | Plug the cover in and update the printer to firmware 1.3.0 or later. The entities appear by themselves once the printer detects the cover |
+| Print State only offers *Any state / Unavailable / Unknown* in the automation editor | Update to 1.14.3 or later, restart Home Assistant and reload the page |
 | Panda Breath entities missing | Enable it in the printer's Firmware Config page first (Extended Firmware only), then reload the integration |
+| Panda Breath drying / DragonBreath fault entities missing | Update to 1.15.0 or later. They need an Extended Firmware whose heater module reports the device's state (current releases do); with older firmware only the temperature, target and filter appear. Drying is Panda Breath (stock BIQU firmware) only |
+| Panda Breath / DragonBreath shows **Offline** on the card | The printer can't reach the heater over Wi-Fi. Check it's powered and give it a fixed IP in your router (Klipper connects to it by IP) |
 | USB camera, RTSP, Spoolman, Last Timelapse or Screen button missing | Enable the feature in the Extended Firmware's Firmware Config page, then reload the integration (Settings → Devices & Services → Snapmaker U1 → ⋮ → Reload). They're detected when the integration starts |
 | PopStatus / PopKnomi not in the Add Integration menu | Update to 1.12.0 (PopStatus) or 1.13.0 (PopKnomi) or later and restart Home Assistant |
 | Sensors fill up the recorder / database | Update to 1.13.1 or later: time sensors update at most every 10 s, the ETA once a minute, and Toolhead Position is off by default. To keep a sensor out of history entirely, exclude it in the [`recorder`](https://www.home-assistant.io/integrations/recorder/) settings |
