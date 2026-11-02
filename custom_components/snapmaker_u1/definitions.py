@@ -16,6 +16,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import (
     PERCENTAGE,
+    EntityCategory,
     UnitOfLength,
     UnitOfTemperature,
     UnitOfTime,
@@ -24,6 +25,8 @@ from homeassistant.util import dt as dt_util
 
 from .coordinator import SnapmakerDataUpdateCoordinator
 from .pysnapmaker.const import (
+    DRAGONBREATH_OBJECT,
+    PANDA_BREATH_OBJECT,
     STATE_CANCELLED,
     STATE_COMPLETE,
     STATE_ERROR,
@@ -474,3 +477,126 @@ PRINTER_BINARY_SENSORS: list[SnapmakerBinarySensorEntityDescription] = [
         },
     ),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Chamber heater devices: the state the panda_breath / dragonbreath Klipper
+# modules report about the heater itself. Keys start with "heater_<object>_"
+# like the heater's own entities, so the card finds them by role.
+# ---------------------------------------------------------------------------
+
+
+def _chamber_device(self, key: str):
+    return self.coordinator.data.chamber_devices.get(key)
+
+
+def chamber_device_binary_sensors(key: str) -> list[SnapmakerBinarySensorEntityDescription]:
+    """Binary sensors for a "panda_breath" or "dragonbreath" Klipper module."""
+    label = chamber_label(key)
+    descriptions = [
+        SnapmakerBinarySensorEntityDescription(
+            key=f"heater_{key}_connected",
+            name=f"{label} Connected",
+            device_class=BinarySensorDeviceClass.CONNECTIVITY,
+            entity_category=EntityCategory.DIAGNOSTIC,
+            value_fn=lambda self: _chamber_device(self, key).connected,
+        )
+    ]
+    if key == DRAGONBREATH_OBJECT:
+        descriptions.append(
+            SnapmakerBinarySensorEntityDescription(
+                key=f"heater_{key}_fault",
+                name=f"{label} Fault",
+                device_class=BinarySensorDeviceClass.PROBLEM,
+                icon="mdi:alert-octagon",
+                # Inhibited: the device's safety model is holding the heater off
+                value_fn=lambda self: bool(
+                    _chamber_device(self, key).fault or _chamber_device(self, key).inhibited
+                ),
+                extra_attributes_fn=lambda self: {
+                    "reason": _chamber_device(self, key).fault_reason,
+                    "inhibited": _chamber_device(self, key).inhibited,
+                    "chamber_sensor": _chamber_device(self, key).chamber_status,
+                    "heater_element": _chamber_device(self, key).element_status,
+                },
+            )
+        )
+    if key == PANDA_BREATH_OBJECT:
+        descriptions.append(
+            SnapmakerBinarySensorEntityDescription(
+                key=f"heater_{key}_drying",
+                name=f"{label} Drying",
+                device_class=BinarySensorDeviceClass.RUNNING,
+                icon="mdi:tumble-dryer",
+                value_fn=lambda self: _chamber_device(self, key).drying,
+                extra_attributes_fn=lambda self: {
+                    "temperature": _chamber_device(self, key).drying_temperature,
+                    "hours": _chamber_device(self, key).drying_hours,
+                    "remaining_seconds": _chamber_device(self, key).drying_remaining
+                    if _chamber_device(self, key).drying
+                    else 0,
+                },
+            )
+        )
+    return descriptions
+
+
+def _drying_minutes_left(self, key: str) -> int | None:
+    device = _chamber_device(self, key)
+    if not device.drying:
+        return 0
+    if device.drying_remaining is None:
+        return None
+    # Round up so "1 min" shows until the cycle really ends
+    return -(-device.drying_remaining // 60)
+
+
+def chamber_device_sensors(key: str) -> list[SnapmakerSensorEntityDescription]:
+    """Sensors for a "panda_breath" or "dragonbreath" Klipper module."""
+    label = chamber_label(key)
+    if key == PANDA_BREATH_OBJECT:
+        return [
+            SnapmakerSensorEntityDescription(
+                key=f"heater_{key}_drying_time_left",
+                name=f"{label} Drying Time Left",
+                device_class=SensorDeviceClass.DURATION,
+                native_unit_of_measurement=UnitOfTime.MINUTES,
+                icon="mdi:timer-sand",
+                value_fn=lambda self: _drying_minutes_left(self, key),
+            )
+        ]
+    if key == DRAGONBREATH_OBJECT:
+        return [
+            SnapmakerSensorEntityDescription(
+                key=f"heater_{key}_element_temp",
+                name=f"{label} Heater Element",
+                device_class=SensorDeviceClass.TEMPERATURE,
+                native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+                state_class=SensorStateClass.MEASUREMENT,
+                icon="mdi:heating-coil",
+                entity_registry_enabled_default=False,
+                value_fn=lambda self: _chamber_device(self, key).element_temperature,
+                min_update_interval=10,
+            ),
+            SnapmakerSensorEntityDescription(
+                key=f"heater_{key}_blower",
+                name=f"{label} Blower",
+                native_unit_of_measurement=PERCENTAGE,
+                state_class=SensorStateClass.MEASUREMENT,
+                icon="mdi:fan",
+                entity_registry_enabled_default=False,
+                value_fn=lambda self: _chamber_device(self, key).blower_percent,
+                extra_attributes_fn=lambda self: {
+                    "reason": _chamber_device(self, key).blower_reason,
+                },
+            ),
+            SnapmakerSensorEntityDescription(
+                key=f"heater_{key}_firmware",
+                name=f"{label} Firmware",
+                icon="mdi:chip",
+                entity_category=EntityCategory.DIAGNOSTIC,
+                entity_registry_enabled_default=False,
+                value_fn=lambda self: _chamber_device(self, key).firmware_version,
+            ),
+        ]
+    return []

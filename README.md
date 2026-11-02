@@ -67,6 +67,7 @@ No Snapmaker account or cloud connection is required. The integration does
 | T0–T3 Filament | Loaded filament, e.g. `PLA Basic`, or `Empty`. Colour, vendor and more as attributes ([details](#filament-type-and-colour)) |
 | Chamber / extra temperature sensors | Every Klipper `temperature_sensor` (e.g. chamber, MCU) |
 | Panda Breath Temperature | Chamber heater temperature, if present ([details](#panda-breath--dragonbreath-chamber-heater)) |
+| Panda Breath Drying Time Left / DragonBreath Heater Element, Blower, Firmware | Chamber heater device state, if present ([details](#panda-breath--dragonbreath-chamber-heater)) |
 | Top Cover Filter Used / Filter Life / Circulation Fan RPM | Filter hours used, % life left and fan speed, if the official Top Cover is fitted ([details](#official-top-cover)) |
 | Part Cooling Fan | Fan speed in % |
 | Print Speed / Flow Rate | Current speed and flow overrides in % |
@@ -82,6 +83,7 @@ No Snapmaker account or cloud connection is required. The integration does
 | Paused | On while a print is paused |
 | Error | On when a Klipper/print error is active (message in attributes) |
 | Filament runout | One per filament sensor (the U1's `filament_motion_sensor e0…e3` and any `filament_switch_sensor`); on when filament is **not** detected |
+| Panda Breath / DragonBreath Connected, Drying, Fault | Chamber heater link, Panda Breath filament drying and DragonBreath faults ([details](#panda-breath--dragonbreath-chamber-heater)) |
 | Printer connection (PopStatus / PopKnomi) | On while a BIQU accessory is connected to the printer ([PopStatus](#biqu-popstatus-light-bar), [PopKnomi](#biqu-popknomi-status-display)) |
 
 ### Buttons
@@ -93,6 +95,7 @@ No Snapmaker account or cloud connection is required. The integration does
 | Home X / Y / Z | Home a single axis |
 | Restart Klipper | Restarts the Klipper process |
 | Reset Top Cover Filter | Resets the filter counter after fitting a new filter (Top Cover only) |
+| Panda Breath Start / Stop Drying, DragonBreath Reset Fault | Chamber heater drying and fault reset, if present ([details](#panda-breath--dragonbreath-chamber-heater)) |
 
 ### Controls (numbers, selects, switches, lights)
 | Entity | Description |
@@ -102,6 +105,7 @@ No Snapmaker account or cloud connection is required. The integration does
 | Part Cooling Fan Speed | 0–100 % |
 | Print Speed Override / Flow Rate Override | `M220` / `M221` |
 | Panda Breath Target | Chamber heater target; `0` turns it off, otherwise between its min and max (e.g. 15–70 °C) |
+| Panda Breath Drying Temperature / Drying Time | Settings for the next filament drying cycle ([details](#filament-drying-panda-breath)) |
 | Print File | Pick a file from the printer and start printing it ([details](#starting-a-print)) |
 | Active Tool | Switch between T0–T3 |
 | Work Light | The cavity light (reads its real state from the printer) |
@@ -285,9 +289,55 @@ extra setup:
 | `sensor.<printer>_panda_breath_temperature` | Chamber heater temperature (attributes: target, power, max_temp) |
 | `number.<printer>_panda_breath_target` | Set the chamber target (°C). `0` turns heating off; any other value must be between the heater's Klipper `min_temp` and `max_temp` (e.g. 15–70 °C) |
 | `switch.<printer>_dragonbreath_filter` | Filter fan (DragonBreath). The device may refuse to turn it on while heating |
+| `binary_sensor.<printer>_panda_breath_connected` | Whether the printer can reach the heater over Wi-Fi (both devices) |
+
+With current Extended Firmware, the heater's Klipper module also reports the
+device's own state, which adds:
+
+| Entity | What it does |
+|---|---|
+| `binary_sensor.<printer>_panda_breath_drying` | Panda Breath filament drying is running (attributes: temperature, hours, remaining_seconds) |
+| `sensor.<printer>_panda_breath_drying_time_left` | Minutes of drying left (`0` when not drying) |
+| `number.<printer>_panda_breath_drying_temperature` / `_drying_time` | Drying settings for the next cycle (20–80 °C, 1–12 h; default 55 °C, 6 h). Kept in Home Assistant across restarts |
+| `button.<printer>_panda_breath_start_drying` / `_stop_drying` | Start a drying cycle with those settings / stop it |
+| `binary_sensor.<printer>_dragonbreath_fault` | DragonBreath fault or safety hold (attributes: reason, inhibited, chamber_sensor, heater_element). A latched fault keeps the heater off until reset |
+| `button.<printer>_dragonbreath_reset_fault` | Clear a latched DragonBreath fault (`DRAGONBREATH_RESET`) |
+| `sensor.<printer>_dragonbreath_heater_element` / `_blower` / `_firmware` | Heater element temperature, blower % (attribute: reason) and device firmware. Disabled by default; enable them on the device page |
 
 On the dashboard card it appears as a **Panda Breath** temperature tile (tap
-to set the target) and a **Filter** button.
+to set the target) and a **Filter** button. The tile shows **Drying** with the
+time left, **Fault** in red, or **Offline** when the printer can't reach the
+heater.
+
+![Chamber heater tiles: DragonBreath fault and Panda Breath drying](docs/images/card-chamber-status.png)
+
+### Filament drying (Panda Breath)
+
+Set **Drying Temperature** and **Drying Time**, then press **Start Drying**.
+Drying runs on the Panda Breath itself, so the chamber heater target stays at
+0 while it runs. It needs BIQU's stock Panda Breath firmware; DragonBreath has
+no drying mode. To get a message when drying is done:
+
+```yaml
+automation:
+  - alias: "Filament drying finished"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.<printer>_panda_breath_drying
+        from: "on"
+        to: "off"
+    action:
+      - service: notify.notify
+        data:
+          message: "Filament drying is done."
+```
+
+### DragonBreath faults
+
+DragonBreath turns the heater off on its own when something is wrong (e.g. an
+over-temperature heater element or a lost link to Klipper) and stays off
+until the fault is cleared. **DragonBreath Fault** turns on when that happens,
+with the reason as an attribute. Fix the cause, then press **Reset Fault**.
 
 Notes:
 - After you enable the heater on the printer, the integration picks it up by

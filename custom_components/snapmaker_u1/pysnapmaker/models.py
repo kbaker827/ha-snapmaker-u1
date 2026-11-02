@@ -38,6 +38,33 @@ class ChamberHeaterData:
     max_temp: float = 80.0
 
 
+@dataclass
+class ChamberDeviceData:
+    """State a chamber heater's Klipper module reports about the device.
+
+    ``panda_breath`` (stock BIQU firmware) and ``dragonbreath`` (community
+    firmware) share ``connected``; the rest is set only by the one that has it.
+    """
+
+    connected: Optional[bool] = None
+    # DragonBreath
+    fault: Optional[bool] = None
+    inhibited: Optional[bool] = None
+    fault_reason: Optional[str] = None
+    heating: Optional[bool] = None
+    element_temperature: Optional[float] = None  # PTC heater element
+    blower_percent: Optional[int] = None
+    blower_reason: Optional[str] = None
+    chamber_status: Optional[str] = None
+    element_status: Optional[str] = None
+    firmware_version: Optional[str] = None
+    # Panda Breath filament drying
+    drying: Optional[bool] = None
+    drying_temperature: Optional[int] = None
+    drying_hours: Optional[int] = None
+    drying_remaining: Optional[int] = None  # seconds
+
+
 # Snapmaker's purifier modes (SET_PURIFIER_MODE MODE=...)
 PURIFIER_MODE_IDLE = 0
 PURIFIER_MODE_COOL = 1
@@ -194,6 +221,8 @@ class SnapmakerPrinterData:
     chamber_heaters: dict[str, ChamberHeaterData] = field(default_factory=dict)
     # Chamber filter / blower pins {"output_pin <name>": on}
     chamber_filters: dict[str, bool] = field(default_factory=dict)
+    # Chamber heater device state {"panda_breath" | "dragonbreath": ...}
+    chamber_devices: dict[str, ChamberDeviceData] = field(default_factory=dict)
     # Official Top Cover (None when the firmware has no purifier object)
     top_cover: Optional[TopCoverData] = None
 

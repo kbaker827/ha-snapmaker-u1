@@ -82,6 +82,16 @@ PRINTER_OBJECTS = [
 
 # Official Top Cover air purifier (stock firmware 1.3.0+)
 PURIFIER_OBJECT = "purifier"
+
+# Klipper modules of the Extended Firmware's chamber heaters. Besides their
+# heater_generic they publish the device's own state (link, faults, drying).
+PANDA_BREATH_OBJECT = "panda_breath"
+DRAGONBREATH_OBJECT = "dragonbreath"
+CHAMBER_DEVICE_OBJECTS = (PANDA_BREATH_OBJECT, DRAGONBREATH_OBJECT)
+# Panda Breath filament drying limits (PANDA_BREATH_DRY_START TEMP= HOURS=)
+PANDA_BREATH_DRY_TEMP_MAX = 80
+PANDA_BREATH_DRY_HOURS_MIN = 1
+PANDA_BREATH_DRY_HOURS_MAX = 12
 # Snapmaker recommends a new filter every 720 hours of circulation.
 TOP_COVER_FILTER_LIFE_HOURS = 720
 
