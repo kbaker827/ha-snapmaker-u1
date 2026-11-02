@@ -23,7 +23,25 @@ from homeassistant.const import (
 from homeassistant.util import dt as dt_util
 
 from .coordinator import SnapmakerDataUpdateCoordinator
-from .pysnapmaker.const import TOP_COVER_FILTER_LIFE_HOURS
+from .pysnapmaker.const import (
+    STATE_CANCELLED,
+    STATE_COMPLETE,
+    STATE_ERROR,
+    STATE_PAUSED,
+    STATE_PRINTING,
+    STATE_STANDBY,
+    TOP_COVER_FILTER_LIFE_HOURS,
+)
+
+# Klipper print_stats states, listed so automations can pick them
+PRINT_STATES = [
+    STATE_STANDBY,
+    STATE_PRINTING,
+    STATE_PAUSED,
+    STATE_COMPLETE,
+    STATE_ERROR,
+    STATE_CANCELLED,
+]
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +108,14 @@ PRINTER_SENSORS: list[SnapmakerSensorEntityDescription] = [
         key="print_state",
         translation_key="print_state",
         icon="mdi:printer-3d",
-        value_fn=lambda self: self.coordinator.data.print_stats.state,
+        device_class=SensorDeviceClass.ENUM,
+        options=PRINT_STATES,
+        # An enum sensor must report one of its options
+        value_fn=lambda self: (
+            self.coordinator.data.print_stats.state
+            if self.coordinator.data.print_stats.state in PRINT_STATES
+            else None
+        ),
     ),
     SnapmakerSensorEntityDescription(
         key="print_progress",
