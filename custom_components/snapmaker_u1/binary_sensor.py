@@ -17,6 +17,7 @@ from .coordinator import SnapmakerDataUpdateCoordinator
 from .definitions import (
     PRINTER_BINARY_SENSORS,
     SnapmakerBinarySensorEntityDescription,
+    chamber_device_binary_sensors,
 )
 from .popstatus_entity import PopStatusEntity, get_popstatus
 from .pysnapmaker.popstatus import PopStatusClient
@@ -61,6 +62,13 @@ async def async_setup_entry(
                 extra_attributes_fn=_make_filament_attrs_fn(key),
             )
             entities.append(SnapmakerFilamentBinarySensor(coordinator, desc, key))
+
+        # Chamber heater devices: link, DragonBreath fault, Panda Breath drying
+        for device_key in coordinator.client.chamber_device_keys:
+            entities.extend(
+                SnapmakerBinarySensor(coordinator, d)
+                for d in chamber_device_binary_sensors(device_key)
+            )
 
     async_add_entities(entities)
 

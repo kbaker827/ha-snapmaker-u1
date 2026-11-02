@@ -34,6 +34,12 @@ from .const import (
     KLIPPER_READY,
     KLIPPER_SHUTDOWN,
     PRINTER_OBJECTS,
+    CHAMBER_DEVICE_OBJECTS,
+    DRAGONBREATH_OBJECT,
+    PANDA_BREATH_DRY_HOURS_MAX,
+    PANDA_BREATH_DRY_HOURS_MIN,
+    PANDA_BREATH_DRY_TEMP_MAX,
+    PANDA_BREATH_OBJECT,
     PURIFIER_OBJECT,
     RTSP_PORT_INTERNAL,
     RTSP_PORT_USB,
@@ -50,6 +56,7 @@ from .const import (
     WS_NOTIFY_TIMELAPSE_EVENT,
 )
 from .models import (
+    ChamberDeviceData,
     ChamberHeaterData,
     FilamentSlot,
     ExtruderData,
@@ -153,6 +160,11 @@ class SnapmakerClient:
         self._temp_sensor_keys: list[str] = []
         self._chamber_heater_keys: list[str] = []
         self._chamber_filter_keys: list[str] = []
+        self._chamber_device_keys: list[str] = []
+        # Panda Breath drying settings for the next start_filament_drying (set
+        # from Home Assistant; the device only learns them when drying starts)
+        self.drying_temperature: float = 55
+        self.drying_hours: float = 6
         self._has_filament_config = False
         self._has_purifier = False
         # Whether the Top Cover was plugged in at setup (None until known).
@@ -310,6 +322,11 @@ class SnapmakerClient:
         return list(self._chamber_heater_keys)
 
     @property
+    def chamber_device_keys(self) -> list[str]:
+        """Discovered chamber heater modules ("panda_breath", "dragonbreath")."""
+        return list(self._chamber_device_keys)
+
+    @property
     def chamber_filter_keys(self) -> list[str]:
         """Discovered chamber filter ``output_pin`` objects."""
         return list(self._chamber_filter_keys)
@@ -397,6 +414,11 @@ class SnapmakerClient:
             self._chamber_filter_keys = [
                 o for o in objects if _RE_CHAMBER_FILTER.match(o)
             ]
+            self._chamber_device_keys = [
+                o for o in objects if o in CHAMBER_DEVICE_OBJECTS
+            ]
+            for key in self._chamber_device_keys:
+                self._data.chamber_devices.setdefault(key, ChamberDeviceData())
             self._has_filament_config = FILAMENT_CONFIG_OBJECT in objects
             self._has_purifier = PURIFIER_OBJECT in objects
             self._has_exclude_object = EXCLUDE_OBJECT in objects
@@ -428,6 +450,7 @@ class SnapmakerClient:
             or _RE_TEMP_SENSOR.match(o)
             or _RE_CHAMBER_HEATER.match(o)
             or _RE_CHAMBER_FILTER.match(o)
+            or o in CHAMBER_DEVICE_OBJECTS
             or o == FILAMENT_CONFIG_OBJECT
             or o == PURIFIER_OBJECT
             or o == EXCLUDE_OBJECT
@@ -686,6 +709,7 @@ class SnapmakerClient:
             + self._temp_sensor_keys
             + self._chamber_heater_keys
             + self._chamber_filter_keys
+            + self._chamber_device_keys
             + ([PURIFIER_OBJECT] if self._has_purifier else [])
             + ([EXCLUDE_OBJECT] if self._has_exclude_object else [])
         )
@@ -1016,6 +1040,12 @@ class SnapmakerClient:
         for key in self._chamber_filter_keys:
             if key in status and "value" in status[key]:
                 self._data.chamber_filters[key] = (status[key]["value"] or 0) > 0
+                changed = True
+
+        for key in self._chamber_device_keys:
+            if isinstance(status.get(key), dict):
+                device = self._data.chamber_devices.setdefault(key, ChamberDeviceData())
+                self._update_chamber_device(device, status[key])
                 changed = True
 
         if EXCLUDE_OBJECT in status and self._data.exclude_object is not None:
@@ -1398,6 +1428,64 @@ class SnapmakerClient:
             )
         name = heater_key.split(" ", 1)[-1]
         await self.execute_gcode(f"SET_HEATER_TEMPERATURE HEATER={name} TARGET={temp:g}")
+
+    @staticmethod
+    def _update_chamber_device(device: ChamberDeviceData, st: dict[str, Any]) -> None:
+        """Apply a panda_breath / dragonbreath status update (fields as published)."""
+        if "connected" in st:
+            device.connected = bool(st["connected"])
+        # DragonBreath
+        for src, attr in (("fault", "fault"), ("inhibited", "inhibited"), ("heating", "heating")):
+            if src in st:
+                setattr(device, attr, bool(st[src]))
+        for src, attr in (
+            ("fault_reason", "fault_reason"),
+            ("fan_reason", "blower_reason"),
+            ("chamber_status", "chamber_status"),
+            ("ptc_status", "element_status"),
+            ("firmware_version", "firmware_version"),
+        ):
+            if src in st:
+                setattr(device, attr, str(st[src]) if st[src] not in (None, "") else None)
+        if isinstance(st.get("ptc_temp"), (int, float)):
+            device.element_temperature = round(st["ptc_temp"], 1)
+        if isinstance(st.get("fan_percent"), (int, float)):
+            device.blower_percent = int(st["fan_percent"])
+        # Panda Breath filament drying
+        if "filament_drying_active" in st:
+            device.drying = bool(st["filament_drying_active"])
+        for src, attr in (
+            ("filament_temp", "drying_temperature"),
+            ("filament_timer", "drying_hours"),
+            ("remaining_seconds", "drying_remaining"),
+        ):
+            if isinstance(st.get(src), (int, float)):
+                setattr(device, attr, int(st[src]))
+
+    async def start_filament_drying(self, temperature: float, hours: float) -> None:
+        """Start a Panda Breath filament drying cycle (stock Panda firmware only)."""
+        if PANDA_BREATH_OBJECT not in self._chamber_device_keys:
+            raise ValueError("No Panda Breath is set up on this printer")
+        if not 0 < temperature <= PANDA_BREATH_DRY_TEMP_MAX:
+            raise ValueError(f"Drying temperature must be 1–{PANDA_BREATH_DRY_TEMP_MAX} °C")
+        if not PANDA_BREATH_DRY_HOURS_MIN <= hours <= PANDA_BREATH_DRY_HOURS_MAX:
+            raise ValueError(
+                f"Drying time must be {PANDA_BREATH_DRY_HOURS_MIN}–"
+                f"{PANDA_BREATH_DRY_HOURS_MAX} hours"
+            )
+        await self.execute_gcode(
+            f"PANDA_BREATH_DRY_START TEMP={int(temperature)} HOURS={int(hours)}"
+        )
+
+    async def stop_filament_drying(self) -> None:
+        """Stop a Panda Breath filament drying cycle."""
+        await self.execute_gcode("PANDA_BREATH_DRY_STOP")
+
+    async def reset_dragonbreath_fault(self) -> None:
+        """Clear a latched DragonBreath fault."""
+        if DRAGONBREATH_OBJECT not in self._chamber_device_keys:
+            raise ValueError("No DragonBreath is set up on this printer")
+        await self.execute_gcode("DRAGONBREATH_RESET")
 
     async def set_chamber_filter(self, pin_key: str, on: bool) -> None:
         """Turn a chamber filter output_pin on or off (e.g. DragonBreath filter)."""

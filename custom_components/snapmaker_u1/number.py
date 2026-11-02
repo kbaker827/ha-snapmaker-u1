@@ -14,9 +14,10 @@ from homeassistant.components.number import (
     NumberEntity,
     NumberEntityDescription,
     NumberMode,
+    RestoreNumber,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature, PERCENTAGE
+from homeassistant.const import UnitOfTemperature, UnitOfTime, PERCENTAGE
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -25,6 +26,12 @@ from .const import DOMAIN
 from .coordinator import SnapmakerDataUpdateCoordinator
 from .definitions import chamber_label, chamber_object_name
 from .pysnapmaker.client import SnapmakerClient
+from .pysnapmaker.const import (
+    PANDA_BREATH_DRY_HOURS_MAX,
+    PANDA_BREATH_DRY_HOURS_MIN,
+    PANDA_BREATH_DRY_TEMP_MAX,
+    PANDA_BREATH_OBJECT,
+)
 from .sensor import SnapmakerBaseEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -206,6 +213,12 @@ async def async_setup_entry(
         )
         entities.append(SnapmakerNumberEntity(coordinator, desc))
 
+    # Panda Breath filament drying settings, used by its Start Drying button
+    if coordinator.client and PANDA_BREATH_OBJECT in coordinator.client.chamber_device_keys:
+        entities.extend(
+            SnapmakerSettingNumber(coordinator, d) for d in panda_breath_drying_numbers()
+        )
+
     # Moonraker Spoolman: the spool loaded on the printer
     if coordinator.client and coordinator.client.has_spoolman:
         entities.append(SnapmakerNumberEntity(coordinator, ACTIVE_SPOOL_NUMBER))
@@ -215,6 +228,45 @@ async def async_setup_entry(
         entities.extend(SnapmakerNumberEntity(coordinator, d) for d in TOP_COVER_NUMBERS)
 
     async_add_entities(entities)
+
+
+def panda_breath_drying_numbers() -> list[SnapmakerNumberEntityDescription]:
+    key = PANDA_BREATH_OBJECT
+
+    async def set_temperature(client: SnapmakerClient, value: float) -> None:
+        client.drying_temperature = value
+
+    async def set_hours(client: SnapmakerClient, value: float) -> None:
+        client.drying_hours = value
+
+    return [
+        SnapmakerNumberEntityDescription(
+            key=f"heater_{key}_drying_temperature",
+            name=f"{chamber_label(key)} Drying Temperature",
+            device_class=NumberDeviceClass.TEMPERATURE,
+            native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+            native_min_value=20,
+            native_max_value=PANDA_BREATH_DRY_TEMP_MAX,
+            native_step=1,
+            mode=NumberMode.BOX,
+            icon="mdi:thermometer",
+            value_fn=lambda coordinator: coordinator.client.drying_temperature,
+            set_fn=set_temperature,
+        ),
+        SnapmakerNumberEntityDescription(
+            key=f"heater_{key}_drying_hours",
+            name=f"{chamber_label(key)} Drying Time",
+            device_class=NumberDeviceClass.DURATION,
+            native_unit_of_measurement=UnitOfTime.HOURS,
+            native_min_value=PANDA_BREATH_DRY_HOURS_MIN,
+            native_max_value=PANDA_BREATH_DRY_HOURS_MAX,
+            native_step=1,
+            mode=NumberMode.BOX,
+            icon="mdi:timer-outline",
+            value_fn=lambda coordinator: coordinator.client.drying_hours,
+            set_fn=set_hours,
+        ),
+    ]
 
 
 def _make_chamber_heater_value_fn(heater_key: str) -> Callable:
@@ -303,6 +355,21 @@ class SnapmakerNumberEntity(SnapmakerBaseEntity, NumberEntity):
             _LOGGER.error(
                 "Error setting %s to %s: %s", self.entity_description.key, value, exc
             )
+
+
+class SnapmakerSettingNumber(SnapmakerNumberEntity, RestoreNumber):
+    """A setting kept in Home Assistant (not on the printer); survives restarts."""
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_number_data()
+        client = self.coordinator.client
+        if last is not None and last.native_value is not None and client is not None:
+            await self.entity_description.set_fn(client, last.native_value)
+
+    async def async_set_native_value(self, value: float) -> None:
+        await super().async_set_native_value(value)
+        self.async_write_ha_state()
 
 
 class SnapmakerExtruderNumberEntity(SnapmakerNumberEntity):

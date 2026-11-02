@@ -7,7 +7,7 @@
  * temperatures and print controls for one printer.
  */
 
-const CARD_VERSION = "1.14.3";
+const CARD_VERSION = "1.15.0";
 const DOMAIN = "snapmaker_u1";
 
 const ACCENTS = {
@@ -615,22 +615,43 @@ class SnapmakerU1Card extends HTMLElement {
           target: num(this._state(`number.heater_${match[1]}_target`)) ?? s?.attributes.target ?? 0,
           unit: s?.attributes.unit_of_measurement,
           moreInfo: this._eid(`number.heater_${match[1]}_target`) || this._eid(role),
+          status: this._heaterStatus(match[1]),
         })
       );
     }
     return tiles.length ? `<div class="temps">${tiles.join("")}</div>` : "";
   }
 
-  _tempTile({ label, icon, current, target, unit, moreInfo, active = false, filament = null }) {
+  // Chamber heater device state from its Klipper module, shown in place of
+  // the target: offline, a DragonBreath fault, or Panda Breath drying.
+  _heaterStatus(name) {
+    const state = (role) => this._state(role)?.state;
+    if (state(`binary_sensor.heater_${name}_connected`) === "off") return { kind: "offline", text: "Offline" };
+    if (state(`binary_sensor.heater_${name}_fault`) === "on") return { kind: "fault", text: "Fault" };
+    if (state(`binary_sensor.heater_${name}_drying`) === "on") {
+      const left = Number(state(`sensor.heater_${name}_drying_time_left`));
+      const time = Number.isFinite(left) && left > 0
+        ? left >= 60 ? `${Math.floor(left / 60)}h ${left % 60}m` : `${left}m`
+        : "";
+      return { kind: "drying", text: "Drying", detail: time ? `${time} left` : "" };
+    }
+    return null;
+  }
+
+  _tempTile({ label, icon, current, target, unit, moreInfo, active = false, filament = null, status = null }) {
     const u = unit || "°C";
     // A target of 0 °C means "off"; shown in °F that is 32.
-    const heating = target != null && target > (u === "°F" ? 32.5 : 0);
+    const heating = status?.kind === "drying" || (target != null && target > (u === "°F" ? 32.5 : 0));
+    const targetText = status
+      ? esc(status.text)
+      : heating ? `→ ${Math.round(target)}${esc(u)}` : target == null ? "&nbsp;" : "Off";
     return `
-      <button class="temp ${heating ? "heating" : ""} ${active ? "active" : ""}"
+      <button class="temp ${heating ? "heating" : ""} ${active ? "active" : ""} ${status ? `is-${status.kind}` : ""}"
         data-action="more-info" data-entity="${esc(moreInfo || "")}">
         <div class="temp-head"><ha-icon icon="${icon}"></ha-icon><span class="temp-label" title="${esc(label)}">${breakableLabel(label)}</span>${this._swatch(filament)}</div>
         <div class="temp-value">${current != null ? Math.round(current) : "–"}<span>${esc(u)}</span></div>
-        <div class="temp-target">${heating ? `→ ${Math.round(target)}${esc(u)}` : target == null ? "&nbsp;" : "Off"}</div>
+        <div class="temp-target">${targetText}</div>
+        ${status?.detail ? `<div class="temp-detail">${esc(status.detail)}</div>` : ""}
         ${this._filamentLine(filament)}
       </button>`;
   }
@@ -1144,6 +1165,10 @@ const STYLES = `
   }
   .temp-filament.is-empty { font-weight: 400; color: var(--secondary-text-color); }
   .temp.heating .temp-target { color: var(--state-climate-heat-color, #ff8100); }
+  .temp.is-fault .temp-target { color: var(--error-color, #db4437); font-weight: 600; }
+  .temp.is-fault .temp-head ha-icon { color: var(--error-color, #db4437); }
+  .temp-detail { font-size: 11px; color: var(--secondary-text-color); white-space: nowrap; }
+  .temp.is-offline .temp-target { color: var(--warning-color, #ffa600); }
   .presets { display: flex; flex-direction: column; gap: 6px; }
   .presets-title { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--secondary-text-color); --mdc-icon-size: 16px; }
   .presets-title ha-icon { color: var(--state-climate-heat-color, #ff8100); }

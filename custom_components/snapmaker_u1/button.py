@@ -8,10 +8,13 @@ from typing import Callable, Coroutine, Any
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import SnapmakerDataUpdateCoordinator
+from .definitions import chamber_label
+from .pysnapmaker.const import DRAGONBREATH_OBJECT, PANDA_BREATH_OBJECT
 from .pysnapmaker.client import SnapmakerClient
 from .sensor import SnapmakerBaseEntity
 
@@ -107,6 +110,49 @@ TOP_COVER_FILTER_RESET = SnapmakerButtonEntityDescription(
 )
 
 
+def _chamber_device_ready(coordinator, key: str) -> bool:
+    device = coordinator.data.chamber_devices.get(key)
+    return bool(coordinator.data.is_ready and device and device.connected)
+
+
+def chamber_device_buttons(key: str) -> list[SnapmakerButtonEntityDescription]:
+    """Panda Breath drying start/stop; DragonBreath fault reset."""
+    label = chamber_label(key)
+    if key == PANDA_BREATH_OBJECT:
+        return [
+            SnapmakerButtonEntityDescription(
+                key=f"heater_{key}_start_drying",
+                name=f"{label} Start Drying",
+                icon="mdi:tumble-dryer",
+                # Uses the Drying Temperature / Drying Time numbers
+                press_fn=lambda client: client.start_filament_drying(
+                    client.drying_temperature, client.drying_hours
+                ),
+                available_fn=lambda coordinator: _chamber_device_ready(coordinator, key)
+                and not coordinator.data.chamber_devices[key].drying,
+            ),
+            SnapmakerButtonEntityDescription(
+                key=f"heater_{key}_stop_drying",
+                name=f"{label} Stop Drying",
+                icon="mdi:tumble-dryer-off",
+                press_fn=lambda client: client.stop_filament_drying(),
+                available_fn=lambda coordinator: _chamber_device_ready(coordinator, key)
+                and bool(coordinator.data.chamber_devices[key].drying),
+            ),
+        ]
+    if key == DRAGONBREATH_OBJECT:
+        return [
+            SnapmakerButtonEntityDescription(
+                key=f"heater_{key}_reset_fault",
+                name=f"{label} Reset Fault",
+                icon="mdi:alert-octagon-outline",
+                press_fn=lambda client: client.reset_dragonbreath_fault(),
+                available_fn=lambda coordinator: _chamber_device_ready(coordinator, key),
+            )
+        ]
+    return []
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -118,6 +164,8 @@ async def async_setup_entry(
     descriptions = list(BUTTON_DESCRIPTIONS)
     if coordinator.client and coordinator.client.has_top_cover:
         descriptions.append(TOP_COVER_FILTER_RESET)
+    for key in coordinator.client.chamber_device_keys if coordinator.client else []:
+        descriptions.extend(chamber_device_buttons(key))
     async_add_entities(
         SnapmakerButton(coordinator, description) for description in descriptions
     )
@@ -160,6 +208,8 @@ class SnapmakerButton(SnapmakerBaseEntity, ButtonEntity):
             return
         try:
             await self.entity_description.press_fn(client)
+        except ValueError as exc:
+            raise ServiceValidationError(str(exc)) from exc
         except Exception as exc:
             _LOGGER.error(
                 "Error pressing button %s: %s", self.entity_description.key, exc

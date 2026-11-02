@@ -23,6 +23,7 @@ from .definitions import (
     TIMELAPSE_SENSOR,
     TOP_COVER_SENSORS,
     SnapmakerSensorEntityDescription,
+    chamber_device_sensors,
     chamber_label,
     chamber_object_name,
 )
@@ -123,6 +124,12 @@ async def async_setup_entry(
                     extra_attributes_fn=_make_chamber_heater_attrs_fn(heater_key),
                 ),
             )
+        )
+
+    # Chamber heater devices (Panda Breath drying, DragonBreath diagnostics)
+    for device_key in coordinator.client.chamber_device_keys if coordinator.client else []:
+        entities.extend(
+            SnapmakerSensor(coordinator, d) for d in chamber_device_sensors(device_key)
         )
 
     # Official Top Cover (air purifier)
