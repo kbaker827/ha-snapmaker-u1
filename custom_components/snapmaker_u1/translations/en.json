@@ -163,6 +163,9 @@
     "camera": {
       "webcam": { "name": "Webcam" }
     },
+    "image": {
+      "print_preview": { "name": "Print Preview" }
+    },
     "number": {
       "bed_target": { "name": "Bed Target Temperature" },
       "fan_speed_setpoint": { "name": "Part Cooling Fan Speed" },

@@ -15,7 +15,9 @@ from .const import (
     CAMERA_SNAPSHOT_PATH,
     CAMERA_STREAM_PATH,
     ENDPOINT_EMERGENCY_STOP,
+    ENDPOINT_FILES_GCODES,
     ENDPOINT_FILES_LIST,
+    ENDPOINT_FILES_METADATA,
     ENDPOINT_GCODE_SCRIPT,
     ENDPOINT_PRINT_CANCEL,
     ENDPOINT_PRINT_PAUSE,
@@ -55,6 +57,7 @@ from .const import (
     WS_NOTIFY_STATUS_UPDATE,
     WS_NOTIFY_TIMELAPSE_EVENT,
 )
+from .thumbnails import pick_thumbnail
 from .models import (
     ChamberDeviceData,
     ChamberHeaterData,
@@ -1574,6 +1577,26 @@ class SnapmakerClient:
         """Return a list of G-code file metadata dicts from the printer."""
         data = await self._get(ENDPOINT_FILES_LIST)
         return data.get("result", [])
+
+    async def fetch_thumbnail(self, filename: str) -> tuple[bytes, str] | None:
+        """Largest preview image of a G-code file as (bytes, content type).
+
+        None when the file has no thumbnails. Raises aiohttp errors when the
+        printer can't be reached or the file is unknown.
+        """
+        data = await self._get(ENDPOINT_FILES_METADATA, params={"filename": filename})
+        result = data.get("result")
+        thumbnails = result.get("thumbnails") if isinstance(result, dict) else None
+        path = pick_thumbnail(filename, thumbnails)
+        if path is None:
+            return None
+        async with self._session.get(
+            f"{self.base_url}{ENDPOINT_FILES_GCODES}{quote(path)}",
+            headers=self.headers,
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.read(), resp.content_type or "image/png"
 
     # ------------------------------------------------------------------
     # Class-level helpers
