@@ -13,6 +13,8 @@ ENDPOINT_PRINTER_RESTART = "/printer/restart"
 ENDPOINT_GCODE_SCRIPT = "/printer/gcode/script"
 ENDPOINT_SERVER_TEMPERATURE_STORE = "/server/temperature_store"
 ENDPOINT_FILES_LIST = "/server/files/list"
+ENDPOINT_FILES_METADATA = "/server/files/metadata"
+ENDPOINT_FILES_GCODES = "/server/files/gcodes/"
 ENDPOINT_PRINT_START = "/printer/print/start"
 ENDPOINT_WEBCAMS_LIST = "/server/webcams/list"
 # Optional Moonraker components (Extended Firmware)

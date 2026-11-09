@@ -154,6 +154,14 @@ with `snapmaker_u1.start_print`.
 > Test camera URLs against the printer's IP, e.g.
 > `http://<printer-ip>/webcam/snapshot.jpg`, not your Home Assistant address.
 
+### Print preview
+- **Print Preview** (`image.<printer>_print_preview`): the thumbnail your
+  slicer embedded in the file being printed (or the last one printed), read
+  from Moonraker's file metadata. The largest thumbnail in the file is used.
+- It changes when a new file is loaded, and has no image while no file is
+  loaded or when the file has no thumbnail (enable thumbnails in your slicer).
+- Show it on a dashboard with a Picture Entity or Tile card.
+
 ### Services
 | Service | Description |
 |---|---|
@@ -821,6 +829,12 @@ More examples elsewhere in this README:
 - **Icon**: shipped in `custom_components/snapmaker_u1/brand/` (light and dark,
   256 px and 512 px), which Home Assistant 2026.3+ uses automatically. Older
   versions show a generic icon. Source: `docs/images/icon.svg`
+
+---
+
+## License
+
+[MIT](LICENSE)
 
 ---
 
