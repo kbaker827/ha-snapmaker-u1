@@ -1,4 +1,4 @@
-<img src="brand/icon@2x.png" alt="Snapmaker U1 integration icon" width="112" align="right">
+<img src="brand/icon@2x.png" alt="Snapmaker U1 3D printer" width="112" align="right">
 
 # ha-snapmaker-u1
 
@@ -828,7 +828,8 @@ More examples elsewhere in this README:
 - **HA version**: Home Assistant 2024.1+
 - **Icon**: shipped in `custom_components/snapmaker_u1/brand/` (light and dark,
   256 px and 512 px), which Home Assistant 2026.3+ uses automatically. Older
-  versions show a generic icon. Source: `docs/images/icon.svg`
+  versions show a generic icon. Source: `docs/images/icon-source.png` (a photo
+  of the U1 with its background removed)
 
 ---
 
