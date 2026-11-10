@@ -1,4 +1,4 @@
-<img src="brand/icon@2x.png" alt="Snapmaker U1 3D printer" width="112" align="right">
+<p align="center"><img src="brand/icon@2x.png" alt="Snapmaker U1 3D printer" width="160"></p>
 
 # ha-snapmaker-u1
 
