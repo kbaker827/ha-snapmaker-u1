@@ -1,0 +1,4 @@
+homeassistant==2026.11.2  # entity, config flow and setup tests; bump deliberately
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=5.0.0

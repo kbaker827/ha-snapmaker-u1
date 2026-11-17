@@ -8,7 +8,7 @@ from typing import Callable, Coroutine, Any
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -204,13 +204,12 @@ class SnapmakerButton(SnapmakerBaseEntity, ButtonEntity):
             return
         client = self.coordinator.client
         if client is None:
-            _LOGGER.warning("Cannot press button – client not available")
-            return
+            raise HomeAssistantError("Snapmaker U1 is not connected")
         try:
             await self.entity_description.press_fn(client)
         except ValueError as exc:
             raise ServiceValidationError(str(exc)) from exc
         except Exception as exc:
-            _LOGGER.error(
-                "Error pressing button %s: %s", self.entity_description.key, exc
-            )
+            raise HomeAssistantError(
+                f"Could not press {self.entity_description.key}: {exc}"
+            ) from exc

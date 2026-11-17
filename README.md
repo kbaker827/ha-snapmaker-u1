@@ -31,6 +31,7 @@ shows your printer's real camera and values.</sub>
 - [Automations](#automations)
 - [Troubleshooting](#troubleshooting)
 - [Technical notes](#technical-notes)
+- [Development](#development)
 
 ---
 
@@ -718,6 +719,11 @@ If you use the
 with forced logins enabled, generate an API key in Moonraker and paste it into
 the API Key field.
 
+If the printer later rejects the key (it was regenerated, or logins were turned
+on), Home Assistant shows a **Reauthenticate** prompt under
+*Settings → Devices & services* where you can enter the new key, instead of
+retrying the connection forever.
+
 ---
 
 ## Automations
@@ -830,6 +836,20 @@ More examples elsewhere in this README:
   256 px and 512 px), which Home Assistant 2026.3+ uses automatically. Older
   versions show a generic icon. Source: `docs/images/icon-source.png` (a photo
   of the U1 with its background removed)
+
+---
+
+## Development
+
+Run the tests (Home Assistant is installed as a test dependency):
+
+```bash
+pip install -r tests/requirements.txt
+python -m pytest --cov=custom_components/snapmaker_u1
+```
+
+CI runs these tests plus hassfest and HACS validation on every push and pull
+request.
 
 ---
 

@@ -7,6 +7,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -19,7 +20,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
-from .pysnapmaker.client import SnapmakerClient
+from .pysnapmaker.client import SnapmakerAuthError, SnapmakerClient
 from .pysnapmaker.const import PRINT_STATE_EVENTS
 from .pysnapmaker.models import SnapmakerPrinterData
 
@@ -117,6 +118,9 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
         if not self._client.connected:
             try:
                 await self._client.fetch_state()
+            except SnapmakerAuthError as exc:
+                # The key was changed on the printer; ask the user for the new one.
+                raise ConfigEntryAuthFailed(str(exc)) from exc
             except Exception as exc:
                 raise UpdateFailed(f"HTTP poll failed: {exc}") from exc
         return self._client.data

@@ -11,6 +11,7 @@ import logging
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -84,17 +85,16 @@ class WorkLightSwitch(SnapmakerBaseEntity, SwitchEntity):
     async def _set_light(self, on: bool) -> None:
         client = self.coordinator.client
         if client is None:
-            _LOGGER.warning("Cannot toggle work light – client not available")
-            return
+            raise HomeAssistantError("Snapmaker U1 is not connected")
         try:
             await client.set_work_light(on)
-            # Optimistic update – Moonraker doesn't report M355 state back
-            self._optimistic_state = on
-            if self.coordinator.data:
-                self.coordinator.data.work_light_on = on
-            self.async_write_ha_state()
         except Exception as exc:
-            _LOGGER.error("Error toggling work light: %s", exc)
+            raise HomeAssistantError(f"Could not switch the work light: {exc}") from exc
+        # Optimistic update – Moonraker doesn't report M355 state back
+        self._optimistic_state = on
+        if self.coordinator.data:
+            self.coordinator.data.work_light_on = on
+        self.async_write_ha_state()
 
 
 class ChamberFilterSwitch(SnapmakerBaseEntity, SwitchEntity):
@@ -135,12 +135,11 @@ class ChamberFilterSwitch(SnapmakerBaseEntity, SwitchEntity):
     async def _set(self, on: bool) -> None:
         client = self.coordinator.client
         if client is None:
-            _LOGGER.warning("Cannot switch chamber filter – client not available")
-            return
+            raise HomeAssistantError("Snapmaker U1 is not connected")
         try:
             await client.set_chamber_filter(self._pin_key, on)
         except Exception as exc:
-            _LOGGER.error("Error switching %s: %s", self._pin_key, exc)
+            raise HomeAssistantError(f"Could not switch {self._pin_key}: {exc}") from exc
 
 
 class TimelapseSwitch(SnapmakerBaseEntity, SwitchEntity):
@@ -168,8 +167,10 @@ class TimelapseSwitch(SnapmakerBaseEntity, SwitchEntity):
     async def _set(self, on: bool) -> None:
         client = self.coordinator.client
         if client is None:
-            return
+            raise HomeAssistantError("Snapmaker U1 is not connected")
         try:
             await client.set_timelapse_enabled(on)
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.error("Could not switch timelapse %s: %s", "on" if on else "off", exc)
+        except Exception as exc:
+            raise HomeAssistantError(
+                f"Could not switch timelapse {'on' if on else 'off'}: {exc}"
+            ) from exc

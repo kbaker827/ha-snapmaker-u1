@@ -19,7 +19,7 @@ from homeassistant.components.number import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTemperature, UnitOfTime, PERCENTAGE
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -344,17 +344,16 @@ class SnapmakerNumberEntity(SnapmakerBaseEntity, NumberEntity):
             return
         client = self.coordinator.client
         if client is None:
-            _LOGGER.warning("Cannot set value – client not available")
-            return
+            raise HomeAssistantError("Snapmaker U1 is not connected")
         try:
             await self.entity_description.set_fn(client, value)
         except ValueError as exc:
             # e.g. a chamber heater target below Klipper's min_temp
             raise ServiceValidationError(str(exc)) from exc
         except Exception as exc:
-            _LOGGER.error(
-                "Error setting %s to %s: %s", self.entity_description.key, value, exc
-            )
+            raise HomeAssistantError(
+                f"Could not set {self.entity_description.key} to {value}: {exc}"
+            ) from exc
 
 
 class SnapmakerSettingNumber(SnapmakerNumberEntity, RestoreNumber):
