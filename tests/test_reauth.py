@@ -70,6 +70,17 @@ async def test_reauth_with_valid_key_updates_entry_and_reloads(flow, entry):
     assert result["reason"] == "reauth_successful"
 
 
+async def test_reauth_reloads_on_home_assistant_without_schedule_reload(flow):
+    # async_schedule_reload arrived in Home Assistant 2024.2; 2024.1 is supported.
+    del flow.hass.config_entries.async_schedule_reload
+    with patch(CHECK, AsyncMock(return_value=CONNECTION_OK)):
+        result = await flow.async_step_reauth_confirm({CONF_API_KEY: "new-key"})
+
+    flow.hass.config_entries.async_reload.assert_called_once_with("entry1")
+    flow.hass.async_create_task.assert_called_once()
+    assert result["reason"] == "reauth_successful"
+
+
 async def test_reauth_on_loaded_entry_leaves_reload_to_update_listener(flow, entry):
     entry.update_listeners = [object()]
     with patch(CHECK, AsyncMock(return_value=CONNECTION_OK)):
