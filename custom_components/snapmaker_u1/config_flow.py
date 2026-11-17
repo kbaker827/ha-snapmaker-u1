@@ -36,6 +36,7 @@ from .const import (
     TEMP_UNIT_SYSTEM,
     is_accessory_entry,
 )
+from .helpers import schedule_entry_reload
 from .pysnapmaker.client import (
     CONNECTION_INVALID_AUTH,
     CONNECTION_OK,
@@ -264,7 +265,7 @@ class SnapmakerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # A loaded entry reloads itself through its update listener.
                 # One whose setup failed on the old key has no listener yet.
                 if not entry.update_listeners:
-                    self.hass.config_entries.async_schedule_reload(entry.entry_id)
+                    schedule_entry_reload(self.hass, entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
             errors["base"] = _connection_error(result)
 

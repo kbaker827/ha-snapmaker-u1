@@ -20,6 +20,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
 )
+from .helpers import schedule_entry_reload
 from .pysnapmaker.client import SnapmakerAuthError, SnapmakerClient
 from .pysnapmaker.const import PRINT_STATE_EVENTS
 from .pysnapmaker.models import SnapmakerPrinterData
@@ -80,13 +81,7 @@ class SnapmakerDataUpdateCoordinator(DataUpdateCoordinator[SnapmakerPrinterData]
 
     def _schedule_reload(self) -> None:
         """Reload the entry so entities match the printer's objects."""
-        schedule = getattr(self.hass.config_entries, "async_schedule_reload", None)
-        if schedule is not None:
-            schedule(self.entry.entry_id)
-        else:  # Home Assistant < 2024.2
-            self.hass.async_create_task(
-                self.hass.config_entries.async_reload(self.entry.entry_id)
-            )
+        schedule_entry_reload(self.hass, self.entry.entry_id)
 
     @callback
     def _on_ws_disconnected(self) -> None:

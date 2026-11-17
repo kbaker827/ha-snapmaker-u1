@@ -605,7 +605,9 @@ With **RTSP** enabled in Firmware Config, the printer serves H.264 streams at
 The integration checks for them at startup; when found, the camera uses the
 RTSP stream for its live view, so you get smooth video and can record clips
 with Home Assistant. Its `rtsp_url` attribute shows the stream in use.
-Reload the integration after turning RTSP on or off.
+Reload the integration after turning RTSP on or off. Since 1.17.0 the
+integration loads Home Assistant's `stream` component itself, so this works
+without `default_config:` in `configuration.yaml`.
 
 ### Exclude object
 
@@ -693,7 +695,9 @@ a new tab, where you can view and use it.
    - **API Key**: leave blank unless you have configured Moonraker authentication
 
 The integration tests the connection before saving. If it succeeds, all
-entities are created immediately. Add the printer first, so a PopStatus or
+entities are created immediately. If the printer rejects the API key, the form
+says so (instead of "Cannot connect"), so you know to check the key rather
+than the address. Add the printer first, so a PopStatus or
 PopKnomi can be linked to it. Run **Add Integration** again for each extra
 printer or accessory.
 
@@ -722,7 +726,7 @@ the API Key field.
 If the printer later rejects the key (it was regenerated, or logins were turned
 on), Home Assistant shows a **Reauthenticate** prompt under
 *Settings → Devices & services* where you can enter the new key, instead of
-retrying the connection forever.
+retrying the connection forever (1.17.0 and later).
 
 ---
 
@@ -785,6 +789,9 @@ More examples elsewhere in this README:
 | Symptom | Fix |
 |---|---|
 | "Cannot connect" during setup | Verify the IP, confirm the printer is on and that Fluidd loads in your browser at that address |
+| "The printer rejected the API key" during setup, or a **Reauthenticate** prompt | Moonraker turned down the key: it was regenerated, logins were turned on, or the key has a typo. Copy the current key from Moonraker and enter it in the prompt (or with ⋮ → Reconfigure). Leave it blank if Home Assistant is a trusted client. Needs 1.17.0 or later; older versions only showed *Retrying setup* |
+| A button, switch or setpoint shows an error such as "Could not press pause: …" | The printer didn't accept the command: it's off or disconnected, Klipper isn't ready (e.g. after an emergency stop, use **Restart Klipper**), or Klipper refused it. The message after the colon is the printer's reason. Before 1.17.0 these failures were only written to the log, and the action looked like it had worked |
+| Camera live view: "does not support play stream service" | Update to 1.17.0 or later, which loads Home Assistant's `stream` component itself. On older versions, add `stream:` (or `default_config:`) to `configuration.yaml` |
 | Everything shows `unavailable` | The printer can't be reached (switched off, or off the network). Entities come back by themselves once it answers again; if they don't, check Klipper logs via Fluidd |
 | Printer was off when Home Assistant started | Nothing to do: the integration shows *Retrying setup* and connects by itself once the printer is back on. If new heaters or sensors appear after Klipper starts, it reloads itself to add them |
 | Camera shows no image / "500: Internal Server Error" snapshot | The integration couldn't get an image from the printer. Open `http://<printer-ip>/webcam/` and `http://<printer-ip>/webcam/snapshot.jpg` in a browser (use the **printer's** IP). If neither shows the camera, the printer isn't exposing its camera over HTTP. The Snapmaker app can reach the camera through its own service, so seeing the feed there doesn't guarantee an HTTP endpoint exists. The [Extended Firmware](https://github.com/paxx12-snapmaker-u1/SnapmakerU1-Extended-Firmware) provides `/webcam/snapshot.jpg` and a live stream. Check the camera entity's `snapshot_url` / `stream_url` attributes and the Home Assistant log (it lists every URL tried) |
