@@ -60,14 +60,23 @@
           "host": "Address",
           "printer_entry_id": "Printer"
         }
+      },
+      "reauth_confirm": {
+        "title": "Update the Snapmaker U1 API key",
+        "description": "The printer at {host} rejected the stored API key. Enter its current Moonraker API key, or leave it blank if Home Assistant is a trusted client.",
+        "data": {
+          "api_key": "API Key"
+        }
       }
     },
     "error": {
       "cannot_connect": "Unable to connect to the printer. Please check the IP address and that the printer is powered on and on the same network.",
-      "accessory_cannot_connect": "Can't reach the device at that address. Check it's powered on and on the same network (open its address in a browser to test)."
+      "accessory_cannot_connect": "Can't reach the device at that address. Check it's powered on and on the same network (open its address in a browser to test).",
+      "invalid_auth": "The printer rejected the API key. Check the key in Moonraker, or leave it blank if Home Assistant is a trusted client."
     },
     "abort": {
-      "already_configured": "This device is already configured."
+      "already_configured": "This device is already configured.",
+      "reauth_successful": "The API key was updated."
     }
   },
   "options": {

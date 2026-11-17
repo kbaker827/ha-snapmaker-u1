@@ -79,6 +79,29 @@ from .models import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Moonraker answers 401 for a missing or wrong API key. It also uses 403, but
+# for reasons a new key can't fix (a path outside a file root, a blocked
+# origin), so only 401 asks the user for a new key.
+_AUTH_FAILURE_STATUSES = (401,)
+
+# Results of SnapmakerClient.async_check_connection
+CONNECTION_OK = "ok"
+CONNECTION_INVALID_AUTH = "invalid_auth"
+CONNECTION_CANNOT_CONNECT = "cannot_connect"
+
+
+class SnapmakerAuthError(Exception):
+    """The printer rejected the API key (HTTP 401)."""
+
+
+def _raise_for_status(resp: aiohttp.ClientResponse) -> None:
+    if resp.status in _AUTH_FAILURE_STATUSES:
+        raise SnapmakerAuthError(
+            f"Moonraker rejected the API key (HTTP {resp.status})"
+        )
+    resp.raise_for_status()
+
+
 # Regex patterns to identify dynamic Moonraker printer objects
 # The U1 uses filament_motion_sensor e0_filament … e3_filament; plain Klipper
 # setups use filament_switch_sensor. Both report enabled/filament_detected.
@@ -367,12 +390,19 @@ class SnapmakerClient:
             )
             self._connected = True
             return True
+        except SnapmakerAuthError:
+            # Retrying won't help; the caller asks the user for a new key.
+            await self._close_own_session()
+            raise
         except Exception as exc:
             _LOGGER.warning("Failed to initialise Snapmaker U1 client: %s", exc)
             # Don't leak the session; Home Assistant will retry setup later.
-            if self._own_session and self._session and not self._session.closed:
-                await self._session.close()
+            await self._close_own_session()
             return False
+
+    async def _close_own_session(self) -> None:
+        if self._own_session and self._session and not self._session.closed:
+            await self._session.close()
 
     async def async_start(self) -> None:
         """Start the WebSocket connection loop."""
@@ -393,8 +423,7 @@ class SnapmakerClient:
                 await self._ws_task
             except asyncio.CancelledError:
                 pass
-        if self._own_session and self._session and not self._session.closed:
-            await self._session.close()
+        await self._close_own_session()
 
     # ------------------------------------------------------------------
     # Dynamic object discovery
@@ -1162,7 +1191,7 @@ class SnapmakerClient:
             params=params,
             timeout=aiohttp.ClientTimeout(total=10),
         ) as resp:
-            resp.raise_for_status()
+            _raise_for_status(resp)
             return await resp.json()
 
     async def _post(self, endpoint: str, data: dict | None = None) -> dict:
@@ -1173,7 +1202,7 @@ class SnapmakerClient:
             json=data or {},
             timeout=aiohttp.ClientTimeout(total=10),
         ) as resp:
-            resp.raise_for_status()
+            _raise_for_status(resp)
             if resp.content_length == 0 or resp.status == 204:
                 return {}
             return await resp.json()
@@ -1191,6 +1220,8 @@ class SnapmakerClient:
             hostname = result.get("hostname", "")
             if hostname:
                 self._data.printer_name = hostname
+        except SnapmakerAuthError:
+            raise
         except Exception as exc:
             _LOGGER.debug("Could not fetch printer info: %s", exc)
 
@@ -1606,7 +1637,14 @@ class SnapmakerClient:
     async def test_connection(
         cls, host: str, port: int = 80, api_key: str | None = None
     ) -> bool:
-        """Return True if the Moonraker API is reachable."""
+        """Return True if the Moonraker API is reachable and accepts the key."""
+        return await cls.async_check_connection(host, port, api_key) == CONNECTION_OK
+
+    @classmethod
+    async def async_check_connection(
+        cls, host: str, port: int = 80, api_key: str | None = None
+    ) -> str:
+        """Return CONNECTION_OK, CONNECTION_INVALID_AUTH or CONNECTION_CANNOT_CONNECT."""
         scheme = "https" if port == 443 else "http"
         if port in (80, 443):
             base = f"{scheme}://{host}"
@@ -1622,6 +1660,11 @@ class SnapmakerClient:
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=8),
                 ) as resp:
-                    return resp.status == 200
-        except Exception:
-            return False
+                    if resp.status == 200:
+                        return CONNECTION_OK
+                    if resp.status in _AUTH_FAILURE_STATUSES:
+                        return CONNECTION_INVALID_AUTH
+                    return CONNECTION_CANNOT_CONNECT
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError, ValueError):
+            # ValueError: a malformed host/URL
+            return CONNECTION_CANNOT_CONNECT

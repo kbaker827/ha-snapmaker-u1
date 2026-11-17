@@ -7,7 +7,11 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform, UnitOfTemperature
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryNotReady,
+    ServiceValidationError,
+)
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -30,6 +34,7 @@ from .frontend import (
     async_register_frontend,
     async_remove_lovelace_resource,
 )
+from .pysnapmaker import SnapmakerAuthError
 from .pysnapmaker.popstatus import PopKnomiClient, PopStatusClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -186,7 +191,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator = SnapmakerDataUpdateCoordinator(hass, entry)
 
-    if not await coordinator.async_setup():
+    try:
+        connected = await coordinator.async_setup()
+    except SnapmakerAuthError as exc:
+        # Home Assistant shows a "Reauthenticate" prompt for a new API key.
+        raise ConfigEntryAuthFailed(str(exc)) from exc
+    if not connected:
         # Printer off or unreachable: Home Assistant retries setup with
         # back-off, so the integration recovers on its own once it's back.
         raise ConfigEntryNotReady(

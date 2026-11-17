@@ -188,15 +188,13 @@ class ActiveToolSelect(SnapmakerBaseEntity, SelectEntity):
         """Switch to the selected tool."""
         client = self.coordinator.client
         if client is None:
-            _LOGGER.warning("Cannot switch tool – client not available")
-            return
+            raise HomeAssistantError("Snapmaker U1 is not connected")
         try:
-            index = int(option[1:])  # Strip the "T" prefix
-            await client.set_active_tool(index)
-            self._current_tool = option
-            self.async_write_ha_state()
+            await client.set_active_tool(int(option[1:]))  # Strip the "T" prefix
         except Exception as exc:
-            _LOGGER.error("Error switching to tool %s: %s", option, exc)
+            raise HomeAssistantError(f"Could not switch to tool {option}: {exc}") from exc
+        self._current_tool = option
+        self.async_write_ha_state()
 
 
 class TopCoverModeSelect(SnapmakerBaseEntity, SelectEntity):
