@@ -46,3 +46,10 @@ def test_manifest_links_issue_tracker_for_hacs():
 
 def test_hacs_declares_minimum_home_assistant_version():
     assert _load(HACS_PATH)["homeassistant"]
+
+
+def test_manifest_does_not_list_home_assistant_core_requirements():
+    # hassfest rejects requirements Home Assistant already ships with.
+    requirements = _load(MANIFEST_PATH)["requirements"]
+
+    assert not [r for r in requirements if r.split(">")[0].split("=")[0] == "aiohttp"]
